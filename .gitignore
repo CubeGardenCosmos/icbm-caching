@@ -1,0 +1,27 @@
+# Python 开发环境工具（build/ 项目本身需要提交）
+build/.venv/
+build/__pycache__/
+**/__pycache__/
+*.pyc
+
+# 开发环境工作区（JDK、反编译源码、参考仓库、测试服务器、草稿）
+build/workspace/
+
+# Java/Gradle 产物（按组件显式列出，避免误伤 build/ Python 项目）
+fabric-source/.gradle/
+fabric-source/build/
+fabric-source/run/
+**/run/
+**/logs/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# 临时与本地配置
+*.tmp
+*.log

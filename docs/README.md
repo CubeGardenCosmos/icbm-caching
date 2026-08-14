@@ -8,6 +8,7 @@
 - [CACHE_PROTOCOL.md](CACHE_PROTOCOL.md)：Fabric 源服、虚拟后端、缓存服务和 Velocity 之间的控制协议草案。
 - [HIERARCHY.md](HIERARCHY.md)：master/slave Velocity 拓扑、认证断言和异步控制平面。
 - [PHASES.md](PHASES.md)：按验收条件组织的阶段性任务。
+- [VERSION_FREEZE.md](VERSION_FREEZE.md)：26.3 版本与指纹冻结清单（唯一来源）。
 
 ## 已确认的前提
 
