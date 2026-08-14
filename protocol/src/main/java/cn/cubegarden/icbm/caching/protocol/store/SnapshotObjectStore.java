@@ -210,6 +210,7 @@ public final class SnapshotObjectStore implements AutoCloseable {
             if (dimensionEpoch == 0L) {
                 // 首次快照隐式确立维度 epoch（与阶段1 本地 sink 语义一致）
                 this.dimensionEpochs.put(key.dimension(), epoch);
+                writeAtomically(dimensionDir(key.dimension()).resolve(EPOCH_FILE), Long.toString(epoch));
             } else if (epoch != dimensionEpoch) {
                 return PutResult.REJECTED_EPOCH_MISMATCH;
             }

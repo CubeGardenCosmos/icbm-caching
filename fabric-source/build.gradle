@@ -15,6 +15,9 @@ dependencies {
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
+	// 共享控制协议模块（includeBuild('../protocol') 提供；netty/slf4j 由 Minecraft/loader 提供）
+	implementation "cn.cubegarden.icbm.caching:protocol:${project.protocol_version}"
+
 	testImplementation platform('org.junit:junit-bom:5.11.0')
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

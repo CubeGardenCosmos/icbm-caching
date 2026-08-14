@@ -1,27 +1,34 @@
 package cn.cubegarden.icbm.caching.source.revision;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.packs.resources.Resource;
 
 /**
  * modpack/registry/datapack fingerprint（对应 HELLO 的 modpackFingerprint 与
  * registryAndDatapackFingerprint，CACHE_PROTOCOL.md §1）。
  *
- * <p>阶段1 覆盖：Minecraft 版本 + 已装模组（id@version）+ 已选数据包。注册表与生成设置指纹
- * 在阶段2 控制服务接入时补充（VERSION_FREEZE.md 注意事项）。
+ * <p>modpack：Minecraft 版本 + 已装模组（id@version）+ 已选数据包 id。
+ * registryAndDatapack：注册表（每个 registry 的 key + 排序后的 entry id，覆盖模组/数据包
+ * 注册表变更）+ 数据包内容（资源路径 + 内容 SHA-256，覆盖生成设置/配方/标签等）。
+ * 确定性与来源：草稿 phase2-control-protocol §5 与 VERSION_FREEZE.md。
  */
 public final class ModpackFingerprint {
 
     private ModpackFingerprint() {
     }
 
-    /** 计算当前服务器指纹（确定性：所有输入排序后拼接再 SHA-256）。 */
+    /** 计算当前服务器 modpack 指纹（确定性：所有输入排序后拼接再 SHA-256）。 */
     public static String compute(MinecraftServer server) {
         List<String> parts = new ArrayList<>();
         parts.add(SharedConstants.getCurrentVersion().name());
@@ -32,6 +39,34 @@ public final class ModpackFingerprint {
         server.getPackRepository().getSelectedIds().stream()
                 .sorted()
                 .forEach(parts::add);
+        return sha256Hex(String.join("|", parts));
+    }
+
+    /**
+     * registry + datapack 指纹（HELLO.registryAndDatapackFingerprint）。
+     *
+     * <p>注册表：{@code registryKey=id1,id2,...}（排序后拼接再整体哈希）；
+     * 数据包：{@code path@sha256}（按路径排序）。
+     */
+    public static String registryAndDatapackFingerprint(MinecraftServer server) throws Exception {
+        List<String> parts = new ArrayList<>();
+        RegistryAccess registryAccess = server.registryAccess();
+        registryAccess.registries().forEach(entry -> {
+            List<String> ids = new ArrayList<>();
+            entry.value().keySet().stream().map(Identifier::toString).sorted().forEach(ids::add);
+            parts.add(entry.key().identifier().toString() + "=" + String.join(",", ids));
+        });
+        List<String> packFiles = new ArrayList<>();
+        server.getResourceManager().listResources("", resourceId -> true).entrySet().stream()
+                .sorted(Comparator.comparing(e -> e.getKey().toString()))
+                .forEach(e -> {
+                    try (InputStream in = e.getValue().open()) {
+                        packFiles.add(e.getKey() + "@" + sha256Hex(in.readAllBytes()));
+                    } catch (Exception ex) {
+                        throw new IllegalStateException("数据包资源读取失败: " + e.getKey(), ex);
+                    }
+                });
+        parts.addAll(packFiles);
         return sha256Hex(String.join("|", parts));
     }
 

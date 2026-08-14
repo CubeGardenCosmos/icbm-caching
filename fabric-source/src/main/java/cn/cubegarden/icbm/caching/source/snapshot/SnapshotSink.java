@@ -1,13 +1,17 @@
 package cn.cubegarden.icbm.caching.source.snapshot;
 
+import cn.cubegarden.icbm.caching.protocol.DimensionRef;
 import cn.cubegarden.icbm.caching.source.revision.ChunkKey;
 
 /**
  * 快照落点接口，镜像 CACHE_PROTOCOL.md 的快照消息顺序：
  * INVALIDATE（raiseRequiredRevision）→ PUT_SNAPSHOT（putSnapshot）→ committedRevision。
  *
- * <p>阶段1 默认实现 {@link LocalSnapshotSink}（本地对象库，含 required/committed 标记与
- * 哈希/大小/epoch/顺序校验）；阶段2 以控制服务远端 sink 替换，消息语义不变。
+ * <p>阶段1 默认实现 {@link LocalSnapshotSink}（本地对象库，委托协议模块
+ * {@link cn.cubegarden.icbm.caching.protocol.store.SnapshotObjectStore}）；阶段2 默认
+ * {@link RemoteSnapshotSink}（控制服务远端）。put/commit 为异步回调接口：本地 sink
+ * 内联完成回调，远端 sink 在控制通道线程完成——提交流程状态机由
+ * {@link SnapshotPublisher} 显式驱动（AGENTS.md「显式状态机」）。
  */
 public interface SnapshotSink extends AutoCloseable {
 
@@ -17,19 +21,35 @@ public interface SnapshotSink extends AutoCloseable {
         REJECTED_EPOCH_MISMATCH,
         REJECTED_HASH_MISMATCH,
         REJECTED_SIZE_MISMATCH,
+        REJECTED_UNSUPPORTED,
+        UNAVAILABLE,
+    }
+
+    interface PutCallback {
+        void onResult(ChunkKey key, long revision, PutResult result);
+    }
+
+    interface CommitCallback {
+        void onCommitted(ChunkKey key, long revision, boolean ok);
     }
 
     /**
-     * 先提高 requiredRevision（对应 INVALIDATE）：使旧 revision 快照立即不可作为基线，
-     * 之后新快照才可读。
+     * 落点当前是否可用。false 时发布器不得 begin（fail closed：
+     * 控制服务不可用时不得产生不确定基线）。
      */
+    boolean available();
+
+    /** 先提高 requiredRevision（对应 INVALIDATE）：异步入队，不阻塞调用线程。 */
     void raiseRequiredRevision(ChunkKey key, long revision);
 
-    /** 持久化并校验快照（对应 PUT_SNAPSHOT）。失败时保持 required，不得提交。 */
-    PutResult putSnapshot(ChunkSnapshot snapshot);
+    /** 持久化并校验快照（对应 PUT_SNAPSHOT）；完成回调在任意线程触发。 */
+    void putSnapshot(ChunkSnapshot snapshot, PutCallback done);
 
     /** 原子设置 committedRevision（对应控制服务验证后提交）。 */
-    void commitRevision(ChunkKey key, long revision);
+    void commitRevision(ChunkKey key, long revision, CommitCallback done);
+
+    /** 维度 epoch 切换（对应 WORLD_EPOCH）：新 epoch 使旧对象不可读。 */
+    void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint);
 
     @Override
     void close();

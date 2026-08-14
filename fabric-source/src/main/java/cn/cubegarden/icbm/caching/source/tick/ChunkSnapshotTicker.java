@@ -1,8 +1,10 @@
 package cn.cubegarden.icbm.caching.source.tick;
 
+import cn.cubegarden.icbm.caching.protocol.DimensionRef;
 import cn.cubegarden.icbm.caching.source.CacheGate;
 import cn.cubegarden.icbm.caching.source.dirty.DirtyTracker;
 import cn.cubegarden.icbm.caching.source.revision.ChunkKey;
+import cn.cubegarden.icbm.caching.source.revision.SourceState;
 import cn.cubegarden.icbm.caching.source.revision.SourceStateService;
 import cn.cubegarden.icbm.caching.source.snapshot.ChunkSnapshot;
 import cn.cubegarden.icbm.caching.source.snapshot.SnapshotPublisher;
@@ -10,11 +12,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -33,6 +38,9 @@ import org.slf4j.LoggerFactory;
  * <p>序列化/压缩在后台 executor（与 ChunkMap.save 中
  * {@code supplyAsync(data::write, Util.backgroundExecutor())} 一致，ChunkMap.java 对照），
  * 不阻塞源服主线程 tick 热路径；revision/epoch 判定与发布回主线程。
+ *
+ * <p>epoch 变化（新 epoch 或首次启动）→ 先向 sink 声明 WORLD_EPOCH（新 epoch 使旧对象
+ * 不可读）；sink 不可用时 begin 失败 → 保持 dirty 重试（fail closed）。
  */
 public final class ChunkSnapshotTicker {
 
@@ -42,17 +50,21 @@ public final class ChunkSnapshotTicker {
     private final SnapshotPublisher publisher;
     private final DirtyTracker tracker;
     private final CacheGate gate;
+    private final String registryAndDatapackFingerprint;
+    private final Map<Identifier, Long> announcedEpochs = new HashMap<>();
 
     public ChunkSnapshotTicker(
             SourceStateService service,
             SnapshotPublisher publisher,
             DirtyTracker tracker,
-            CacheGate gate
+            CacheGate gate,
+            String registryAndDatapackFingerprint
     ) {
         this.service = service;
         this.publisher = publisher;
         this.tracker = tracker;
         this.gate = gate;
+        this.registryAndDatapackFingerprint = registryAndDatapackFingerprint;
     }
 
     public void onEndServerTick(MinecraftServer server) {
@@ -62,6 +74,13 @@ public final class ChunkSnapshotTicker {
         Set<ChunkKey> keys = this.tracker.dirtySet().drain();
         for (ChunkKey key : keys) {
             this.publish(server, key);
+        }
+    }
+
+    /** 首次启动时声明各已知维度的当前 epoch（sink 恢复维度 epoch 基线）。 */
+    public void announceInitialEpochs() {
+        for (Map.Entry<Identifier, Long> entry : this.service.state().epochs().entrySet()) {
+            this.announceEpoch(entry.getKey(), entry.getValue());
         }
     }
 
@@ -77,8 +96,11 @@ public final class ChunkSnapshotTicker {
         }
 
         long epoch = this.service.epochFor(key.dimension());
+        this.announceEpoch(key.dimension(), epoch);
         long revision = this.service.nextRevision(key);
         if (!this.publisher.begin(key, revision)) {
+            // 闸门关闭或 sink 不可用：保持 dirty，重连/恢复后补发（fail closed）
+            this.tracker.dirtySet().mark(key);
             return;
         }
 
@@ -93,9 +115,24 @@ public final class ChunkSnapshotTicker {
                         this.publisher.put(snapshot);
                         this.publisher.commit(snapshot.key(), snapshot.revision());
                         this.publisher.endTick(snapshot.key());
-                        LOGGER.debug("[icbm-source] 已提交快照: {} rev={} epoch={}", snapshot.key(), snapshot.revision(), snapshot.epoch());
+                        LOGGER.debug("[icbm-source] 已提交快照: {} rev={} epoch={}",
+                                snapshot.key(), snapshot.revision(), snapshot.epoch());
                     });
                 });
+    }
+
+    /** epoch 变化/首次时向 sink 声明 WORLD_EPOCH（幂等：同 epoch 只声明一次）。 */
+    private synchronized void announceEpoch(Identifier dimension, long epoch) {
+        Long announced = this.announcedEpochs.get(dimension);
+        if (announced != null && announced == epoch) {
+            return;
+        }
+        SourceState.EpochTransition transition = this.service.state().epochTransition(dimension);
+        String reason = transition == null ? "START" : transition.reason().name();
+        this.publisher.sink().announceEpoch(
+                new DimensionRef(dimension.getNamespace(), dimension.getPath()),
+                epoch, reason, this.registryAndDatapackFingerprint);
+        this.announcedEpochs.put(dimension, epoch);
     }
 
     private static ChunkSnapshot serialize(ChunkKey key, long revision, long epoch, SerializableChunkData data) {
