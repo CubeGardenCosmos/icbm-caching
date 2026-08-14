@@ -5,9 +5,9 @@ import java.nio.charset.StandardCharsets;
 /**
  * 控制协议常量（docs/CACHE_PROTOCOL.md §1 包络字段；草稿 phase2-control-protocol §3/§4）。
  *
- * <p>帧格式：{@code ICBM magic(4) + schemaVersion(1) + messageType(1) + requestId(8) +
- * sourceServerId(utf16 长度前缀字符串) + worldEpoch(8) + sequence(8) + sentAt(8) +
- * bodyLength(4) + body(bodyLength 字节)}。
+ * <p>帧格式：传输层为 {@code [4字节大端长度][ICBM magic(4) + schemaVersion(1) + messageType(1) +
+ * requestId(8) + sourceServerId(utf16 长度前缀字符串) + worldEpoch(8) + sequence(8) + sentAt(8) +
+ * bodyLength(4) + body(bodyLength 字节)]}；{@link FrameCodec} 只处理长度后的帧体。
  */
 public final class ProtocolConstants {
 

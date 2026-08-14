@@ -1,0 +1,60 @@
+package cn.cubegarden.icbm.caching.control;
+
+import cn.cubegarden.icbm.caching.control.config.ServiceConfig;
+import cn.cubegarden.icbm.caching.control.net.ControlServer;
+import cn.cubegarden.icbm.caching.control.net.PeerRegistry;
+import cn.cubegarden.icbm.caching.control.replication.EventLog;
+import cn.cubegarden.icbm.caching.control.replication.Replicator;
+import cn.cubegarden.icbm.caching.control.service.ControlService;
+import cn.cubegarden.icbm.caching.protocol.store.SnapshotObjectStore;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Properties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * 控制服务入口（master 缓存目录）：恢复对象库与事件日志 → 启动 netty mTLS 服务。
+ *
+ * <p>配置：环境变量 {@code ICBM_CONTROL_CONFIG} 指定 properties 路径；
+ * 缺省使用工作目录下 {@code control.properties} 或全默认值。
+ */
+public final class ControlServiceMain {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ControlServiceMain.class);
+
+    private ControlServiceMain() {
+    }
+
+    public static void main(String[] args) throws Exception {
+        Path configPath = Path.of(System.getenv().getOrDefault("ICBM_CONTROL_CONFIG", "control.properties"));
+        ServiceConfig config = loadConfig(configPath);
+        Files.createDirectories(config.storeRoot());
+
+        SnapshotObjectStore store = new SnapshotObjectStore(config.storeRoot());
+        store.recover();
+        EventLog eventLog = new EventLog(config.eventLogPath(), config.maxEventLogEntries());
+        eventLog.recover();
+        PeerRegistry registry = new PeerRegistry(config.roleBindings());
+        Replicator replicator = new Replicator(store, eventLog, config);
+        ControlService service = new ControlService(store, eventLog, replicator, registry, config);
+        ControlServer server = new ControlServer(config, service, replicator, registry);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(server::stop));
+        server.start();
+        LOGGER.info("[control] 就绪：对象库={} events={} peerBindings={}",
+                config.storeRoot(), config.eventLogPath(), config.roleBindings().keySet());
+    }
+
+    private static ServiceConfig loadConfig(Path path) throws Exception {
+        if (!Files.isRegularFile(path)) {
+            LOGGER.warn("[control] 未找到配置 {}，使用默认值", path.toAbsolutePath());
+            return ServiceConfig.defaults(Path.of(".").toAbsolutePath());
+        }
+        Properties props = new Properties();
+        try (var in = Files.newInputStream(path)) {
+            props.load(in);
+        }
+        return ServiceConfig.from(props, path.toAbsolutePath().getParent());
+    }
+}

@@ -1,0 +1,48 @@
+plugins {
+    id 'application'
+}
+
+version = project.control_version
+group = project.maven_group
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // 共享协议模块（includeBuild('../protocol') 提供；netty/slf4j 由此处显式提供）
+    implementation "cn.cubegarden.icbm.caching:protocol:${project.protocol_version}"
+
+    implementation 'io.netty:netty-handler:4.1.115.Final'
+    implementation 'io.netty:netty-codec:4.1.115.Final'
+    implementation 'io.netty:netty-transport:4.1.115.Final'
+    implementation 'org.slf4j:slf4j-api:2.0.16'
+    runtimeOnly 'ch.qos.logback:logback-classic:1.5.12'
+
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'ch.qos.logback:logback-classic:1.5.12'
+}
+
+application {
+    mainClass = 'cn.cubegarden.icbm.caching.control.ControlServiceMain'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 25
+    it.options.encoding = 'UTF-8'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+}

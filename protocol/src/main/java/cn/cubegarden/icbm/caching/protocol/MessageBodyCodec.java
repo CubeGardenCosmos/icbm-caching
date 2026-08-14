@@ -374,7 +374,7 @@ public final class MessageBodyCodec {
         return DimensionRef.parse(readString(in));
     }
 
-    static void writeString(DataOutput out, String value) throws IOException {
+    public static void writeString(DataOutput out, String value) throws IOException {
         byte[] bytes = ProtocolConstants.utf8(value);
         if (bytes.length > ProtocolConstants.MAX_STRING_BYTES) {
             throw new IOException("string too long: " + bytes.length);
@@ -383,7 +383,7 @@ public final class MessageBodyCodec {
         out.write(bytes);
     }
 
-    static String readString(DataInput in) throws IOException {
+    public static String readString(DataInput in) throws IOException {
         int length = in.readUnsignedShort();
         byte[] bytes = new byte[length];
         in.readFully(bytes);

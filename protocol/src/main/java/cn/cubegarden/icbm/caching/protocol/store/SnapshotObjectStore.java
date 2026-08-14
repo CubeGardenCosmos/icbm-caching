@@ -49,11 +49,12 @@ public final class SnapshotObjectStore implements AutoCloseable {
     private static final String SNAPSHOT_FILE = "snapshot.nbt.gz";
     private static final String METADATA_FILE = "metadata.json";
 
-    /** 单区块恢复后的索引（required/committed/对象哈希/对象 epoch/损坏标志）。 */
-    public record ChunkIndex(long required, long committed, String committedHash, long committedEpoch, boolean corrupt) {
+    /** 单区块恢复后的索引（required/committed/对象哈希/对象 epoch/解压长度/损坏标志）。 */
+    public record ChunkIndex(long required, long committed, String committedHash, long committedEpoch,
+                             int committedUncompressedLength, boolean corrupt) {
 
         public static ChunkIndex empty() {
-            return new ChunkIndex(0, 0, "", 0, false);
+            return new ChunkIndex(0, 0, "", 0, 0, false);
         }
     }
 
@@ -129,19 +130,20 @@ public final class SnapshotObjectStore implements AutoCloseable {
         long committed = readLong(chunkDir.resolve(COMMITTED_FILE), 0L);
         if (committed > required) {
             // 违反提交顺序：损坏，fail closed
-            this.index.put(key, new ChunkIndex(required, committed, "", 0, true));
+            this.index.put(key, new ChunkIndex(required, committed, "", 0, 0, true));
             return;
         }
         if (committed > 0) {
             Metadata meta = readMetadata(chunkDir.resolve(Long.toString(committed)).resolve(METADATA_FILE));
             boolean objectExists = Files.isRegularFile(chunkDir.resolve(Long.toString(committed)).resolve(SNAPSHOT_FILE));
             if (meta == null || !objectExists) {
-                this.index.put(key, new ChunkIndex(required, committed, "", 0, true));
+                this.index.put(key, new ChunkIndex(required, committed, "", 0, 0, true));
                 return;
             }
-            this.index.put(key, new ChunkIndex(required, committed, meta.payloadHash(), meta.epoch(), false));
+            this.index.put(key, new ChunkIndex(required, committed, meta.payloadHash(), meta.epoch(),
+                    meta.uncompressedLength(), false));
         } else {
-            this.index.put(key, new ChunkIndex(required, committed, "", 0, false));
+            this.index.put(key, new ChunkIndex(required, committed, "", 0, 0, false));
         }
     }
 
@@ -169,7 +171,8 @@ public final class SnapshotObjectStore implements AutoCloseable {
             if (revision <= current.required()) {
                 return; // 仅增：重放/乱序不能降低 required
             }
-            this.index.put(key, new ChunkIndex(revision, current.committed(), current.committedHash(), current.committedEpoch(), current.corrupt()));
+            this.index.put(key, new ChunkIndex(revision, current.committed(), current.committedHash(),
+                    current.committedEpoch(), current.committedUncompressedLength(), current.corrupt()));
             Path dir = chunkDir(key);
             writeAtomically(dir.resolve(REQUIRED_FILE), Long.toString(revision));
         }
@@ -248,6 +251,7 @@ public final class SnapshotObjectStore implements AutoCloseable {
             }
             String hash = "";
             long epoch = 0;
+            int uncompressedLength = 0;
             if (revision > 0) {
                 Metadata meta = readMetadata(chunkDir(key).resolve(Long.toString(revision)).resolve(METADATA_FILE));
                 if (meta == null) {
@@ -255,8 +259,10 @@ public final class SnapshotObjectStore implements AutoCloseable {
                 }
                 hash = meta.payloadHash();
                 epoch = meta.epoch();
+                uncompressedLength = meta.uncompressedLength();
             }
-            this.index.put(key, new ChunkIndex(current.required(), revision, hash, epoch, current.corrupt()));
+            this.index.put(key, new ChunkIndex(current.required(), revision, hash, epoch,
+                    uncompressedLength, current.corrupt()));
             writeAtomically(chunkDir(key).resolve(COMMITTED_FILE), Long.toString(revision));
         }
     }
@@ -303,6 +309,12 @@ public final class SnapshotObjectStore implements AutoCloseable {
         }
     }
 
+    /** committed 对象的解压长度（metadata 持久化值；无对象返回 0）。 */
+    public int committedUncompressedLength(ChunkRef key) {
+        ChunkIndex current = this.index.get(key);
+        return current == null || current.corrupt() ? 0 : current.committedUncompressedLength();
+    }
+
     /** 已知区块（含损坏）按区域枚举（ADMIN_INVALIDATE REGION 范围用）。 */
     public List<ChunkRef> chunksInRegion(DimensionRef dimension, int regionX, int regionZ) {
         List<ChunkRef> result = new ArrayList<>();
@@ -325,6 +337,11 @@ public final class SnapshotObjectStore implements AutoCloseable {
             }
         }
         return result;
+    }
+
+    /** 已知维度（ADMIN_INVALIDATE WORLD 范围用）。 */
+    public List<DimensionRef> knownDimensions() {
+        return new ArrayList<>(this.dimensionEpochs.keySet());
     }
 
     public ChunkIndex indexOf(ChunkRef key) {
