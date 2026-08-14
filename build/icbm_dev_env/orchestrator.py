@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .domain import control, decompile, jdk, modbuild, refs, server
+from .domain import control, decompile, jdk, modbuild, refs, registry_capture, server
+from .domain import virtual_backend
 from .infra import shell
 
 
@@ -19,6 +20,8 @@ class Orchestrator:
             "build": modbuild.run_build,
             "control": control.start_control_service,
             "certs": control.gen_certs,
+            "capture-registry": registry_capture.capture_registry,
+            "vb": virtual_backend.start_virtual_backend,
         }[command]
         return int(handler() or 0)
 

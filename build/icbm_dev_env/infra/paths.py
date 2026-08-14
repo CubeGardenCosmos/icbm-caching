@@ -23,9 +23,11 @@ FABRIC_SOURCE = REPO_ROOT / "fabric-source"
 PROTOCOL = REPO_ROOT / "protocol"
 CONTROL_SERVICE = REPO_ROOT / "control-service"
 VELOCITY_PLUGIN = REPO_ROOT / "velocity-plugin"
+VIRTUAL_BACKEND = REPO_ROOT / "virtual-backend"
+REGISTRY_DUMP = REPO_ROOT / "tools" / "registry-dump"
 
 # 全部 Java 组件（构建/测试/清理按此遍历；fabric-source 为 Loom 模组，其余为纯 Java）
-JAVA_COMPONENTS = (PROTOCOL, CONTROL_SERVICE, VELOCITY_PLUGIN, FABRIC_SOURCE)
+JAVA_COMPONENTS = (PROTOCOL, CONTROL_SERVICE, VELOCITY_PLUGIN, VIRTUAL_BACKEND, FABRIC_SOURCE)
 
 # 控制服务运行目录与 mTLS 证书
 CONTROL_RUN = WORKSPACE / "control-run"

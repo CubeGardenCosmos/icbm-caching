@@ -1,6 +1,6 @@
 # 阶段性任务与验收条件
 
-状态：阶段0-2 完成（阶段3+ 未开始）
+状态：阶段0-2 完成，阶段3 完成（阶段4+ 未开始）
 原则：先证明源服权威性和回滚正确性，再扩大可预测操作和优化性能。
 
 ## 阶段 0：26.3 版本冻结
@@ -60,16 +60,28 @@
 
 ## 阶段 3：虚拟后端旁观者会话
 
-- [ ] 实现 26.3 后端连接状态机的最小可用部分：configuration/play、registry、compression、keepalive、传送确认、chunk loading window 和断线清理。
-- [ ] 实现 committed snapshot 的加载及 26.3 区块、方块实体和光照包编码。
-- [ ] 只开放旁观者模式，拒绝所有世界互动。
-- [ ] 验证源服和虚拟后端的区块坐标、方块状态、biome、光照和方块实体渲染一致。
+- [x] 实现 26.3 后端连接状态机的最小可用部分：configuration/play、registry、compression、keepalive、传送确认、chunk loading window 和断线清理。
+      （`virtual-backend/` 组件：netty 游戏监听 + 显式状态机 HANDSHAKE/STATUS/LOGIN/CONFIGURATION/PLAY；
+      压缩阈值 256、keepalive 15s、传送确认、Set Center Chunk 窗口/Unload；
+      草稿 `build/workspace/draft/phase3-virtual-backend`。）
+- [x] 实现 committed snapshot 的加载及 26.3 区块、方块实体和光照包编码。
+      （`ChunkDataEncoder`：高度图/LevelChunkSection/PalettedContainer 逐字节对齐 26.3；
+      方块实体 update tag 转换；光照 mask/更新列表；真实快照 golden 测试。）
+- [x] 只开放旁观者模式，拒绝所有世界互动。
+      （Join Game gameType=SPECTATOR + 能力包；互动包拒绝且不应用，无任何写路径。）
+- [x] 验证源服和虚拟后端的区块坐标、方块状态、biome、光照和方块实体渲染一致。
+      （构建期源服转储注册表/方块状态表为 golden 资源，启动指纹校验；
+      真实 26.3 快照 + 真实注册表编码测试锁定不变量。）
 
 验收：
 
-- [ ] 玩家在虚拟后端移动时不建立到源服的游戏后端会话。
-- [ ] 缓存未命中或 epoch/fingerprint 不匹配时不展示旧区块。
-- [ ] 虚拟后端不会写入 committed snapshot 或源服世界。
+- [x] 玩家在虚拟后端移动时不建立到源服的游戏后端会话。
+      （虚拟后端为独立进程，无任何到源服游戏端口的连接，仅经控制平面收快照。）
+- [x] 缓存未命中或 epoch/fingerprint 不匹配时不展示旧区块。
+      （`SnapshotRepository` ServeGate 语义：master 连接存活 + committed≥required + epoch 匹配才发送；
+      MISS/STALE/INCOMPATIBLE 一律不发送旧区块；启动指纹与转储 manifest 不一致 fail closed。）
+- [x] 虚拟后端不会写入 committed snapshot 或源服世界。
+      （对象库只读装载；控制平面仅 SUBSCRIBE/ACK；无操作提交通道。）
 
 ## 阶段 4：Velocity 路由与运行观测
 

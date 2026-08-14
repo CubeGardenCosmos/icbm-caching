@@ -27,7 +27,7 @@
 ## 控制协议冻结
 
 - 包络 schemaVersion：`1`；帧格式 `[4字节长度][ICBM magic + 包络 + body]`（golden 测试锁定，`protocol/` 模块）。
-- 组件版本：protocol `1.2.0`、control-service `1.2.0`、velocity-plugin `1.3.0`、fabric-source `1.3.0`（大版本.阶段.bug 规则，见 AGENTS.md「版本号管理」）。
+- 组件版本：protocol `1.2.0`、control-service `1.2.0`、velocity-plugin `1.3.0`、fabric-source `1.3.0`、virtual-backend `1.4.0`（大版本.阶段.bug 规则，见 AGENTS.md「版本号管理」）。
 
 ## 构建指纹
 

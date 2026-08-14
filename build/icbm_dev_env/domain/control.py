@@ -5,9 +5,10 @@
   master-control.p12      控制服务（master）私钥证书（CN=master-control）
   source-server.p12       Fabric 源模组客户端（CN=source-server → SOURCE 角色）
   slave-a.p12 / slave-b.p12  地区 slave 客户端（CN=slave-a/b → VELOCITY 角色）
+  virtual-backend.p12     虚拟后端客户端（CN=virtual-backend → VIRTUAL_BACKEND 角色）
 
 角色绑定（control.properties control.roleBindings）：
-  source-server=SOURCE,slave-a=VELOCITY,slave-b=VELOCITY
+  source-server=SOURCE,slave-a=VELOCITY,slave-b=VELOCITY,virtual-backend=VIRTUAL_BACKEND
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ def gen_certs() -> None:
     certs.mkdir(parents=True, exist_ok=True)
     _shell(certs, "openssl req -x509 -newkey rsa:2048 -keyout ca.key -out ca.crt "
                   "-days 3650 -nodes -subj /CN=icbm-test-ca")
-    for cn in ("master-control", "source-server", "slave-a", "slave-b"):
+    for cn in ("master-control", "source-server", "slave-a", "slave-b", "virtual-backend"):
         _shell(certs, f"openssl req -newkey rsa:2048 -keyout {cn}.key -out {cn}.csr "
                       f"-nodes -subj /CN={cn}")
         _shell(certs, f"openssl x509 -req -in {cn}.csr -CA ca.crt -CAkey ca.key "
@@ -39,6 +40,12 @@ def gen_certs() -> None:
     _shell(certs, "keytool -importcert -noprompt -alias ca -file ca.crt "
                   "-keystore ca-trust.p12 -storetype PKCS12 -storepass changeit")
     print(f"证书就绪: {certs}")
+
+
+def gen_certs_and_roles() -> None:
+    """生成证书并保证控制服务角色绑定包含全部角色（含 VIRTUAL_BACKEND）。"""
+    gen_certs()
+    write_control_config()
 
 
 def write_control_config() -> None:
@@ -57,7 +64,7 @@ def write_control_config() -> None:
         "control.storeRoot={run}/objects\n"
         "control.eventLogPath={run}/events.log\n"
         "control.serverId=master-1\n"
-        "control.roleBindings=source-server=SOURCE,slave-a=VELOCITY,slave-b=VELOCITY\n"
+        "control.roleBindings=source-server=SOURCE,slave-a=VELOCITY,slave-b=VELOCITY,virtual-backend=VIRTUAL_BACKEND\n"
         "control.pushWindow=64\n"
         "control.heartbeatIntervalMillis=30000\n"
         "control.lagThresholdMillis=90000\n"

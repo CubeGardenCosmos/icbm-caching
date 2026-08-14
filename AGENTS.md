@@ -59,7 +59,7 @@
 - 组件目录归属是架构约束，不是建议，第一方组件使用 `icbm-` 前缀；Java 包统一以 `cn.cubegarden.icbm.caching` 为根（与仓库/项目身份一致），按组件分子包：
   - `fabric-source/`：源 Fabric 权威模组（Java；包 `cn.cubegarden.icbm.caching.source`，模组 ID `icbm_source`）。
   - `velocity-plugin/`：master/slave Velocity 插件（包 `cn.cubegarden.icbm.caching.velocity`；阶段2 已实现控制平面复制客户端与 serve gate，Velocity 事件/路由接线为阶段4）。
-  - `virtual-backend/`：虚拟后端（未来，阶段3，包 `cn.cubegarden.icbm.caching.virtual`）。
+  - `virtual-backend/`：虚拟后端（阶段3 已实现 26.3 旁观者会话，包 `cn.cubegarden.icbm.caching.virtual`）。
   - `control-service/`：缓存控制服务（master 缓存目录，包 `cn.cubegarden.icbm.caching.control`；阶段2 已实现 mTLS 控制平面、对象库、事件日志与 slave 复制）。
   - `auth-gateway/`：唯一执行 Mojang 正版验证的认证网关（未来）。
   - `protocol/`：跨组件共享控制协议（包 `cn.cubegarden.icbm.caching.protocol`，纯 Java 25，netty/slf4j 由消费方提供；含包络/消息编解码、SnapshotObjectStore、ControlChannel 客户端基类）。

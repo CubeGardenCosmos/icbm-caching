@@ -129,13 +129,18 @@ class ControlServiceIntegrationTest {
 
         TestClient(String id, Role role, String fingerprint, String registryFingerprint,
                    int port, SSLContext ssl) {
-            this(id, role, fingerprint, registryFingerprint, port, ssl, 1073742154);
+            this(id, role, fingerprint, registryFingerprint, port, ssl, 1073742154, "26.3");
         }
 
         TestClient(String id, Role role, String fingerprint, String registryFingerprint,
                    int port, SSLContext ssl, int runtimeProtocol) {
+            this(id, role, fingerprint, registryFingerprint, port, ssl, runtimeProtocol, "26.3");
+        }
+
+        TestClient(String id, Role role, String fingerprint, String registryFingerprint,
+                   int port, SSLContext ssl, int runtimeProtocol, String minecraftVersion) {
             this.channel = new ControlChannel("127.0.0.1", port, id,
-                    new ControlChannel.HelloConfig(role, "26.3", runtimeProtocol, "0.19.3",
+                    new ControlChannel.HelloConfig(role, minecraftVersion, runtimeProtocol, "0.19.3",
                             "0.157.1+26.3", fingerprint, registryFingerprint, (byte) 0),
                     ssl, 5000, 100, false, new ControlChannel.Listener() {
                         @Override
@@ -413,6 +418,22 @@ class ControlServiceIntegrationTest {
             assertTrue(bad.handshakeDone.await(5, TimeUnit.SECONDS), "握手必须被拒绝");
             assertTrue(bad.events.stream().anyMatch(e -> e.startsWith("rejected:")),
                     "runtimeProtocol 不匹配必须被拒: " + bad.events);
+        }
+    }
+
+    @Test
+    void minecraftVersionFamilyAcceptedAndOtherRejected() throws Exception {
+        // 源模组与虚拟后端 HELLO 携带完整版本名（如 "26.3 Snapshot 8"），
+        // 26.3 系列（由 runtimeProtocol 精确锁定）必须被接受；其它系列必须被拒
+        try (TestClient source = new TestClient(SOURCE_ID, Role.SOURCE, FINGERPRINT, REGISTRY_FINGERPRINT,
+                serverPort(), sourceSsl(), 1073742154, "26.3 Snapshot 8")) {
+            source.awaitConnected();
+        }
+        try (TestClient bad = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+                serverPort(), slaveSsl(), 1073742154, "26.2 Snapshot 3")) {
+            assertTrue(bad.handshakeDone.await(5, TimeUnit.SECONDS), "握手必须被拒绝");
+            assertTrue(bad.events.stream().anyMatch(e -> e.startsWith("rejected:")),
+                    "非 26.3 系列必须被拒: " + bad.events);
         }
     }
 

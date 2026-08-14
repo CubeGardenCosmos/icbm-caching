@@ -12,3 +12,8 @@
 | 6 | slave 落后不服务 | 无（原版无缓存复制） | 落后 slave（committed < master required）拒绝服务该区块，直到收到新快照 | 项目扩展 | ServeGate STALE 判定；CACHE_PROTOCOL §6 |
 | 7 | 控制服务不可用 | 无 | slave/虚拟后端拒绝不确定基线（连接断开即停止服务） | 项目扩展 | fail closed；CACHE_PROTOCOL §6 |
 | 8 | 序号校验 | 无（原版协议无包序号） | 源→master 连接内序号严格递增（gap/重放断连）；跨连接由对象库单调性兜底 | 项目扩展 | CACHE_PROTOCOL §1 |
+| 9 | 区块包高度图条目顺序 | vanilla `ClientboundLevelChunkPacketData` 用 `Collectors.toMap`（HashMap 迭代序，跨 JVM 不稳定） | 固定按枚举序 WORLD_SURFACE → MOTION_BLOCKING | 一致（渲染等价） | 客户端按类型 id 解入 EnumMap，顺序无关；虚拟后端确定性优先；草稿 phase3-virtual-backend §2 |
+| 10 | 区块包方块实体 tag | vanilla 线上 tag = `BlockEntity.getUpdateTag`（多数类型空；sign/beacon 等为 saveAdditional） | 由快照 saveWithFullMetadata 剥离 x/y/z 后直发（含 id/components/附加数据） | 一致（渲染等价） | 客户端以包内 BlockEntityInfo.type 构造并 loadAdditional，多余字段无害；逐字节差异记录于此；草稿 phase3-virtual-backend §2 |
+| 11 | 光照空层 mask | vanilla `prepareSectionData`：引擎持有全零 DataLayer → 置 emptyMask | 快照 NBT 只存非空层，空层不置 mask 也不发数据 | 一致（渲染等价） | 客户端初始光照为 0，缺失 mask 视为无变化 → 同样全零；草稿 phase3-virtual-backend §2 |
+| 12 | 登录/身份 | 原版 online mode（Mojang 验证） | 阶段3 虚拟后端 offline 模式（离线 UUID，名字哈希），Auth Gateway 接入为阶段0/4 | 阶段限制 | HIERARCHY §3；LoginSession 扩展点 |
+| 13 | 区块包编码非确定部分 | vanilla 同一快照的编码字节 | 虚拟后端从快照 NBT 确定性重编码（同输入同输出，测试锁定） | 一致 | 真实快照 golden 测试；vanilla 本身依赖内存态（调色板/光照引擎），无字节级参照 |

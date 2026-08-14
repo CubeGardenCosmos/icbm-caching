@@ -41,7 +41,9 @@ HELLO 包还必须携带：
     capabilities
 
 指纹不一致、证书 CN 绑定角色与 HELLO.role 不一致、版本/runtimeProtocol 不匹配时，控制服务
-拒绝连接（HELLO_ACK accepted=false）与快照复用。slave 的指纹必须与已注册源的指纹一致。
+拒绝连接（HELLO_ACK accepted=false）与快照复用。slave/虚拟后端的指纹必须与已注册源的指纹一致。
+阶段3 起虚拟后端以 VIRTUAL_BACKEND 角色订阅并维护本地对象库（与 slave 同协议），装载前按
+§6 服务闸门判定（master 连接存活 + committed≥required + epoch 匹配），否则不展示旧区块（fail closed）。
 
 ## 2. 快照消息
 

@@ -16,6 +16,10 @@ control-service/.gradle/
 control-service/build/
 velocity-plugin/.gradle/
 velocity-plugin/build/
+virtual-backend/.gradle/
+virtual-backend/build/
+tools/registry-dump/.gradle/
+tools/registry-dump/build/
 fabric-source/run/
 **/run/
 **/logs/

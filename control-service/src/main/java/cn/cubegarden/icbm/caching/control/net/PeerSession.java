@@ -183,7 +183,7 @@ public final class PeerSession extends ChannelInboundHandlerAdapter {
         }
         this.sourceServerId = envelope.sourceServerId();
         String rejectReason = null;
-        if (!"26.3".equals(hello.minecraftVersion())) {
+        if (!hello.minecraftVersion().startsWith("26.3")) {
             rejectReason = "minecraftVersion 不支持: " + hello.minecraftVersion();
         } else if (hello.runtimeProtocol() != this.config.runtimeProtocol()) {
             rejectReason = "runtimeProtocol 不匹配: " + hello.runtimeProtocol()
