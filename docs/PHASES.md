@@ -5,7 +5,7 @@
 
 ## 阶段 0：26.3 版本冻结
 
-- [ ] 记录完整 Minecraft 26.3 构建、运行时 protocol、Java、Velocity、Fabric Loader、Fabric API 和 mappings 版本。
+- [x] 记录完整 Minecraft 26.3 构建、运行时 protocol、Java、Velocity、Fabric Loader、Fabric API 和 mappings 版本（见 [VERSION_FREEZE.md](VERSION_FREEZE.md)；Velocity 版本待 slave 阶段记录）。
 - [ ] 固定源服模组、配置、数据包和生成设置，并计算 modpack/registry/datapack fingerprint。
 - [ ] 建立源 Fabric、master 缓存目录、slave Velocity、虚拟后端和控制服务的隔离实验环境。
 - [ ] 建立 master 与至少两个地区 slave 的 mTLS 控制平面，验证 slave 之间不互信。
@@ -21,17 +21,17 @@
 
 ## 阶段 1：源 Fabric revision 与快照
 
-- [ ] 实现 worldEpoch 和 chunk revision 的持久化。
-- [ ] 接入 ServerChunkEvents、玩家破坏和方块实体事件作为诊断与早期 dirty 标记。
-- [ ] 用 26.3 mappings 和字节码确认方块修改、chunk 脏标记和方块实体脏标记的 Mixin 目标。
-- [ ] 每 tick 合并 dirty chunk，一次性生成 revision 和稳定快照。
-- [ ] 实现先 requiredRevision 后 committedRevision 的对象提交流程。
+- [x] 实现 worldEpoch 和 chunk revision 的持久化（`SourceState` + `SavedDataType` codec；重启恢复/损坏回退见验收）。
+- [x] 接入 ServerChunkEvents、玩家破坏和方块实体事件作为诊断与早期 dirty 标记。
+- [x] 用 26.3 mappings 和字节码确认方块修改、chunk 脏标记和方块实体脏标记的 Mixin 目标（`ChunkAccess#markUnsaved` 唯一权威路径；`Level.blockEntityChanged`→markUnsaved；`ChunkHolder.sectionLightChanged`→markUnsaved；启动自检 fail closed）。
+- [x] 每 tick 合并 dirty chunk，一次性生成 revision 和稳定快照（`ChunkSnapshotTicker`；序列化/压缩走后台 executor，不阻塞 tick）。
+- [x] 实现先 requiredRevision 后 committedRevision 的对象提交流程（`SnapshotPublisher` 显式状态机 + `LocalSnapshotSink` 本地对象库，含哈希/大小/epoch/顺序校验）。
 
 验收：
 
-- [ ] 玩家、刻、命令、活塞、液体、世界生成、方块实体和模组修改都会递增正确 chunk 的 revision。
-- [ ] 未修改邻居不递增 revision。
-- [ ] 重启后 revision 不倒退；无法证明时产生新 epoch。
+- [x] 玩家、刻、命令、活塞、液体、世界生成、方块实体和模组修改都会递增正确 chunk 的 revision（markUnsaved 权威路径覆盖全部；测试服务器 setblock 实测）。
+- [x] 未修改邻居不递增 revision（vanilla 光照传播视为真实修改，见 [PARITY.md](PARITY.md) #1）。
+- [x] 重启后 revision 不倒退；无法证明时产生新 epoch（单元测试 + 实盘落盘验证）。
 
 ## 阶段 2：后台控制协议
 

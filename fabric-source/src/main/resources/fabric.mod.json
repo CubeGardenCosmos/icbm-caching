@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "icbm_source",
+  "version": "${version}",
+  "name": "ICBM Source",
+  "description": "ICBM Caching 权威源 Fabric 模组：worldEpoch/chunk revision、脏标记、快照与 required/committed 提交流程（阶段1）",
+  "authors": ["CubeGarden Studio"],
+  "license": "GPL-3.0-only",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "cn.cubegarden.icbm.caching.source.IcbmSource"
+    ]
+  },
+  "mixins": [
+    "icbm_source.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "fabric-api": "*",
+    "minecraft": "~26.3-",
+    "java": ">=25"
+  }
+}

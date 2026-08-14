@@ -9,6 +9,7 @@
 - [HIERARCHY.md](HIERARCHY.md)：master/slave Velocity 拓扑、认证断言和异步控制平面。
 - [PHASES.md](PHASES.md)：按验收条件组织的阶段性任务。
 - [VERSION_FREEZE.md](VERSION_FREEZE.md)：26.3 版本与指纹冻结清单（唯一来源）。
+- [PARITY.md](PARITY.md)：与原版行为的一致性/有意差异记录。
 
 ## 已确认的前提
 
