@@ -26,7 +26,7 @@ public record Envelope(
         if (schemaVersion != ProtocolConstants.SCHEMA_VERSION) {
             throw new IllegalArgumentException("unsupported schemaVersion: " + schemaVersion);
         }
-        if (body.length > ProtocolConstants.DEFAULT_MAX_FRAME_BYTES) {
+        if (body.length > ProtocolConstants.MAX_FRAME_HARD_LIMIT) {
             throw new IllegalArgumentException("body too large: " + body.length);
         }
     }

@@ -168,9 +168,10 @@ class FrameCodecTest {
         assertThrows(IOException.class, () -> FrameCodec.decodeFrame(frame));
     }
 
+    /** 单帧硬上限兜底（帧层负责实际大小限制）。 */
     @Test
     void oversizeBodyRejectedAtEnvelopeConstruction() {
-        byte[] big = new byte[ProtocolConstants.DEFAULT_MAX_FRAME_BYTES + 1];
+        byte[] big = new byte[ProtocolConstants.MAX_FRAME_HARD_LIMIT + 1];
         assertThrows(IllegalArgumentException.class, () -> Envelope.of(
                 MessageType.ACK, 0, "p", 0, 1, 1, big
         ));

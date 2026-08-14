@@ -20,11 +20,14 @@ public final class ProtocolConstants {
     /** 当前 schema 版本（唯一冻结值，见 docs/VERSION_FREEZE.md）。 */
     public static final byte SCHEMA_VERSION = 1;
 
-    /** 默认单帧 body 上限（16 MiB）；PUT_SNAPSHOT 的 payload 单独受 {@link #MAX_SNAPSHOT_BYTES} 限制。 */
-    public static final int DEFAULT_MAX_FRAME_BYTES = 16 * 1024 * 1024;
-
     /** 单个快照 payload 上限（压缩后；GZIP 区块 NBT 远小于此，留余量防放大攻击）。 */
     public static final int MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+
+    /** 默认单帧 body 上限（16 MiB）；实际由帧层按配置拦截，PUT_SNAPSHOT 的 payload 单独受 {@link #MAX_SNAPSHOT_BYTES} 限制。 */
+    public static final int DEFAULT_MAX_FRAME_BYTES = 16 * 1024 * 1024;
+
+    /** 单帧硬上限（Envelope 构造兜底；含最大快照 + 元数据余量，防越界分配）。 */
+    public static final int MAX_FRAME_HARD_LIMIT = MAX_SNAPSHOT_BYTES + 4 * 1024 * 1024;
 
     /** 字符串上限（sourceServerId、fingerprint、dimensionId 等）。 */
     public static final int MAX_STRING_BYTES = 65535;
