@@ -1,0 +1,205 @@
+package cn.cubegarden.icbm.caching.protocol;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import org.junit.jupiter.api.Test;
+
+/**
+ * golden 序列化测试：线上字节布局锁定（AGENTS.md「协议改动：golden 序列化测试」）。
+ */
+class FrameCodecTest {
+
+    private static byte[] encodeBody(MessageType type, Object body) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        MessageBodyCodec.encode(type, new DataOutputStream(bytes), body);
+        return bytes.toByteArray();
+    }
+
+    private static Object decodeBody(MessageType type, byte[] body) throws IOException {
+        return MessageBodyCodec.decode(type, new DataInputStream(new ByteArrayInputStream(body)));
+    }
+
+    @Test
+    void envelopeGoldenBytes() {
+        Envelope envelope = Envelope.of(
+                MessageType.HELLO, 7L, "source-a", 42L, 1L, 1_700_000_000_000L,
+                new byte[] {1, 2, 3}
+        );
+        byte[] frame = FrameCodec.encodeFrame(envelope);
+
+        // ICBM magic + schema 1 + type 0x01 + requestId 7 + sourceServerId(8 字节 "source-a")
+        byte[] expected = new byte[] {
+                0x49, 0x43, 0x42, 0x4D,                 // "ICBM"
+                0x01,                                   // schemaVersion
+                0x01,                                   // HELLO
+                0, 0, 0, 0, 0, 0, 0, 7,                 // requestId=7
+                0, 8, 's', 'o', 'u', 'r', 'c', 'e', '-', 'a', // 字符串长度 8 + UTF-8
+                0, 0, 0, 0, 0, 0, 0, 42,                // worldEpoch=42
+                0, 0, 0, 0, 0, 0, 0, 1,                 // sequence=1
+                0, 0, 1, (byte) 0x8B, (byte) 0xCF, (byte) 0xE5, 0x68, 0x00, // sentAt=1700000000000
+                0, 0, 0, 3,                             // bodyLength=3
+                1, 2, 3                                 // body
+        };
+        assertArrayEquals(expected, frame);
+    }
+
+    @Test
+    void helloBodyGoldenBytes() throws IOException {
+        Messages.Hello hello = new Messages.Hello(
+                Role.SOURCE, "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
+                "modpack-hash", "registry-hash", (byte) 0
+        );
+        byte[] body = encodeBody(MessageType.HELLO, hello);
+        // role SOURCE(0) + "26.3" + protocol int + "0.19.3" + "0.157.1+26.3" + modpack + registry + capabilities
+        assertEquals(0, body[0]);
+        assertEquals(0, body[1]);
+        assertEquals(4, body[2]);
+        assertEquals('2', body[3]);
+        // protocol int (1073742154 = 0x4000014A)
+        assertEquals(0x40, body[7] & 0xFF);
+        assertEquals(0x00, body[8] & 0xFF);
+        assertEquals(0x01, body[9] & 0xFF);
+        assertEquals(0x4A, body[10] & 0xFF);
+
+        Messages.Hello decoded = MessageBodyCodec.decode(MessageType.HELLO,
+                new DataInputStream(new ByteArrayInputStream(body)));
+        assertEquals(hello, decoded);
+    }
+
+    @Test
+    void roundTripAllMessageTypes() throws IOException {
+        DimensionRef dim = DimensionRef.of("minecraft", "overworld");
+        byte[] payload = {9, 8, 7};
+
+        Object[] samples = new Object[] {
+                new Messages.Hello(Role.VELOCITY, "26.3", 1073742154, "0.19.3", "0.157.1+26.3", "m", "r", (byte) 1),
+                new Messages.HelloAck(true, "", "master-1"),
+                new Messages.WorldEpoch(dim, 3, EpochReason.ROLLBACK, "reg"),
+                new Messages.Invalidate(dim, 3, -1, 7, InvalidateReason.BLOCK_STATE),
+                new Messages.PutSnapshot(dim, 3, -1, 7, "NBT_CHUNK_V1", "GZIP", 3, "abc", payload),
+                new Messages.PutSnapshotAck(dim, 3, -1, 7, PutResult.OK),
+                new Messages.ResolveChunkReq(dim, 3, -1, 1073742154, "reg", 5),
+                new Messages.ResolveChunkRes(dim, 3, -1, ResolveStatus.HIT, 7, "obj", "hash"),
+                new Messages.Subscribe(new DimensionRef[] {dim}, true, 0),
+                new Messages.SnapshotPush(new Messages.PutSnapshot(dim, 3, -1, 7, "NBT_CHUNK_V1", "GZIP", 3, "abc", payload)),
+                new Messages.Ack(99),
+                new Messages.ResyncReq(dim, 5),
+                new Messages.ResyncRes(dim, 5, 7, 2),
+                new Messages.Heartbeat(1_700_000_000_000L, 10),
+                new Messages.AdminInvalidate(dim, "REGION", 0, 0, 1, 1, "admin test"),
+                new Messages.ErrorMessage("bad frame")
+        };
+        MessageType[] types = new MessageType[] {
+                MessageType.HELLO, MessageType.HELLO_ACK, MessageType.WORLD_EPOCH,
+                MessageType.INVALIDATE, MessageType.PUT_SNAPSHOT, MessageType.PUT_SNAPSHOT_ACK,
+                MessageType.RESOLVE_CHUNK_REQ, MessageType.RESOLVE_CHUNK_RES, MessageType.SUBSCRIBE,
+                MessageType.SNAPSHOT_PUSH, MessageType.ACK, MessageType.RESYNC_REQ,
+                MessageType.RESYNC_RES, MessageType.HEARTBEAT, MessageType.ADMIN_INVALIDATE,
+                MessageType.ERROR
+        };
+        for (int i = 0; i < samples.length; i++) {
+            byte[] body = encodeBody(types[i], samples[i]);
+            Object decoded = decodeBody(types[i], body);
+            assertMessageEquals(types[i], samples[i], decoded);
+            // 包络整体 round-trip（body 为字节数组，逐字段比较）
+            Envelope envelope = Envelope.of(types[i], 1, "peer", 0, 1, 2, body);
+            Envelope back = FrameCodec.decodeFrame(FrameCodec.encodeFrame(envelope));
+            assertEquals(envelope.schemaVersion(), back.schemaVersion());
+            assertEquals(envelope.messageType(), back.messageType());
+            assertEquals(envelope.requestId(), back.requestId());
+            assertEquals(envelope.sourceServerId(), back.sourceServerId());
+            assertEquals(envelope.worldEpoch(), back.worldEpoch());
+            assertEquals(envelope.sequence(), back.sequence());
+            assertEquals(envelope.sentAt(), back.sentAt());
+            assertArrayEquals(envelope.body(), back.body());
+        }
+    }
+
+    /** byte[] 字段的 record 用引用相等：对含 payload 的消息逐字段比较。 */
+    private static void assertMessageEquals(MessageType type, Object expected, Object actual) {
+        if (expected instanceof Messages.PutSnapshot e && actual instanceof Messages.PutSnapshot a) {
+            assertEquals(e.dimension(), a.dimension(), "round-trip " + type);
+            assertEquals(e.chunkX(), a.chunkX());
+            assertEquals(e.chunkZ(), a.chunkZ());
+            assertEquals(e.revision(), a.revision());
+            assertEquals(e.snapshotFormat(), a.snapshotFormat());
+            assertEquals(e.compression(), a.compression());
+            assertEquals(e.uncompressedLength(), a.uncompressedLength());
+            assertEquals(e.payloadHash(), a.payloadHash());
+            assertArrayEquals(e.payload(), a.payload());
+            return;
+        }
+        if (expected instanceof Messages.SnapshotPush e && actual instanceof Messages.SnapshotPush a) {
+            assertMessageEquals(type, e.snapshot(), a.snapshot());
+            return;
+        }
+        if (expected instanceof Messages.Subscribe e && actual instanceof Messages.Subscribe a) {
+            assertEquals(e.pushEnabled(), a.pushEnabled());
+            assertEquals(e.ackedSequence(), a.ackedSequence());
+            assertArrayEquals(e.dimensions(), a.dimensions());
+            return;
+        }
+        assertEquals(expected, actual, "round-trip " + type);
+    }
+
+    @Test
+    void badMagicRejected() {
+        byte[] frame = FrameCodec.encodeFrame(Envelope.of(
+                MessageType.ACK, 0, "p", 0, 1, 1, new byte[] {0, 0, 0, 0, 0, 0, 0, 0}
+        ));
+        frame[0] = 'X';
+        assertThrows(IOException.class, () -> FrameCodec.decodeFrame(frame));
+    }
+
+    @Test
+    void unknownMessageTypeRejected() {
+        byte[] frame = FrameCodec.encodeFrame(Envelope.of(
+                MessageType.ACK, 0, "p", 0, 1, 1, new byte[] {0, 0, 0, 0, 0, 0, 0, 0}
+        ));
+        frame[5] = 0x7F; // 未知 type
+        assertThrows(IOException.class, () -> FrameCodec.decodeFrame(frame));
+    }
+
+    @Test
+    void oversizeBodyRejectedAtEnvelopeConstruction() {
+        byte[] big = new byte[ProtocolConstants.DEFAULT_MAX_FRAME_BYTES + 1];
+        assertThrows(IllegalArgumentException.class, () -> Envelope.of(
+                MessageType.ACK, 0, "p", 0, 1, 1, big
+        ));
+    }
+
+    @Test
+    void snapshotPayloadLengthGuard() throws IOException {
+        // 手工构造超长 payload 长度字段：解码必须拒绝
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(bytes);
+        MessageBodyCodec.writeDimension(out, DimensionRef.of("minecraft", "overworld"));
+        out.writeInt(0);
+        out.writeInt(0);
+        out.writeLong(1);
+        MessageBodyCodec.writeString(out, "NBT_CHUNK_V1");
+        MessageBodyCodec.writeString(out, "GZIP");
+        out.writeInt(0);
+        MessageBodyCodec.writeString(out, "h");
+        out.writeInt(ProtocolConstants.MAX_SNAPSHOT_BYTES + 1); // 超限
+        byte[] body = bytes.toByteArray();
+        assertThrows(IOException.class, () -> MessageBodyCodec.decode(
+                MessageType.PUT_SNAPSHOT, new DataInputStream(new ByteArrayInputStream(body))
+        ));
+    }
+
+    @Test
+    void allMessageTypesHaveCodecs() {
+        for (MessageType type : MessageType.values()) {
+            assertTrue(MessageBodyCodec.hasBody(type), "missing codec for " + type);
+        }
+    }
+}

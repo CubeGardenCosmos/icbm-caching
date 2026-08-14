@@ -10,6 +10,12 @@ build/workspace/
 # Java/Gradle 产物（按组件显式列出，避免误伤 build/ Python 项目）
 fabric-source/.gradle/
 fabric-source/build/
+protocol/.gradle/
+protocol/build/
+control-service/.gradle/
+control-service/build/
+velocity-plugin/.gradle/
+velocity-plugin/build/
 fabric-source/run/
 **/run/
 **/logs/

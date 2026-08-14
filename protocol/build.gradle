@@ -1,0 +1,42 @@
+plugins {
+    id 'java-library'
+}
+
+version = project.protocol_version
+group = project.maven_group
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // netty/slf4j 由消费方提供（mod: Minecraft 自带；control-service/velocity-plugin: 显式依赖），
+    // 协议模块自身只编译引用，避免版本冲突（AGENTS.md「避免重复实现」单侧实现）。
+    compileOnly 'io.netty:netty-handler:4.1.115.Final'
+    compileOnly 'org.slf4j:slf4j-api:2.0.16'
+
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation 'io.netty:netty-handler:4.1.115.Final'
+    testImplementation 'org.slf4j:slf4j-simple:2.0.16'
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 25
+    it.options.encoding = 'UTF-8'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+}
