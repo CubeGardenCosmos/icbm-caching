@@ -1,0 +1,17 @@
+[project]
+name = "icbm-dev-env"
+version = "1.0.0"
+description = "ICBM Caching development environment tooling (uv-managed, stdlib only)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["icbm_dev_env"]
+
+[tool.uv]
+package = true
