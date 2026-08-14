@@ -20,7 +20,14 @@
 | Fabric Loader | `0.19.3` | meta.fabricmc.net |
 | Fabric API | `0.157.1+26.3` | Modrinth fabric-api |
 | Fabric Loom（Gradle 插件） | `1.17.19` | maven.fabricmc.net |
+| netty（控制服务/协议模块） | `4.1.115.Final` | mavenCentral（mod 内由 Minecraft 提供，不重复打包） |
+| slf4j / logback | `2.0.16` / `1.5.12` | mavenCentral（control-service 显式；mod 内由 loader 提供） |
 | 参考仓库 | FabricMC/fabric `26.3` 分支；PaperMC/Velocity `master` | 只读克隆到 `build/workspace/` |
+
+## 控制协议冻结
+
+- 包络 schemaVersion：`1`；帧格式 `[4字节长度][ICBM magic + 包络 + body]`（golden 测试锁定，`protocol/` 模块）。
+- 组件版本：protocol `1.2.0`、control-service `1.2.0`、velocity-plugin `1.3.0`、fabric-source `1.3.0`（大版本.阶段.bug 规则，见 AGENTS.md「版本号管理」）。
 
 ## 构建指纹
 

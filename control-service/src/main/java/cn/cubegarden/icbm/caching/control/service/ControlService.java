@@ -175,7 +175,8 @@ public final class ControlService implements AutoCloseable {
                     this.store.committedUncompressedLength(key),
                     index.committedHash(), payload));
             session.sendWithSequence(cn.cubegarden.icbm.caching.protocol.MessageType.SNAPSHOT_PUSH,
-                    0, this.eventLog.lastSequence() + 1L + replayed, encode(push));
+                    0, this.store.dimensionEpoch(msg.dimension()),
+                    this.eventLog.lastSequence() + 1L + replayed, encode(push));
             lastCommitted = index.committed();
             replayed++;
         }

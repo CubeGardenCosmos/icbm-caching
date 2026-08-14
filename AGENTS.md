@@ -22,7 +22,7 @@
   - init 末尾询问是否安装基础软件（Rust 工具链、Node、pi AI 工具）。
 - Python 工具由 uv 管理（`build/pyproject.toml`、`build/uv.lock`）；功能按分层拆分在 `build/icbm_dev_env/` 包内（入口 → 编排 → 领域功能 → 基础设施），`build/main.py` 只做 uv 自举与 CLI 分发，禁止向 `main.py` 堆逻辑。
 - 所有联网操作（git/urllib/Gradle/curl）遵循 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量；Gradle 步骤由脚本翻译为 JVM 代理参数。
-- 测试服务器：`build/main.py server` 启动 `build/workspace/server` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行组件测试。
+- 测试服务器：`build/main.py server` 启动 `build/workspace/server` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行全部组件测试（protocol/control-service/velocity-plugin/fabric-source）；`build/main.py control` 前台启动控制服务（端口 11420，mTLS 证书由 `build/main.py certs` 生成到 `build/workspace/certs`）。
 - 环境重置与清理：`reinit`（删除 `build/workspace` 后重新完整部署，适合反编译结果被污染时）与 `cleanup`（删除 `build/workspace` 与各组件构建产物，腾出硬盘空间）均为破坏性操作，脚本会先请求确认。
 - `build/workspace/`、`build/.venv/`、各组件 `build/`、`.gradle/`、`run/` 目录被 Git 忽略。
 - 开发环境改动（如升级 Loom/Gradle/JDK 版本）需同步更新 `docs/VERSION_FREEZE.md`、`build/` 脚本与本文档。
@@ -58,10 +58,11 @@
 
 - 组件目录归属是架构约束，不是建议，第一方组件使用 `icbm-` 前缀；Java 包统一以 `cn.cubegarden.icbm.caching` 为根（与仓库/项目身份一致），按组件分子包：
   - `fabric-source/`：源 Fabric 权威模组（Java；包 `cn.cubegarden.icbm.caching.source`，模组 ID `icbm_source`）。
-  - `velocity-plugin/`：master/slave Velocity 插件（未来，包 `cn.cubegarden.icbm.caching.velocity`）。
-  - `virtual-backend/`：虚拟后端（未来，包 `cn.cubegarden.icbm.caching.virtual`）。
-  - `control-service/`：缓存控制服务（未来，包 `cn.cubegarden.icbm.caching.control`）。
+  - `velocity-plugin/`：master/slave Velocity 插件（包 `cn.cubegarden.icbm.caching.velocity`；阶段2 已实现控制平面复制客户端与 serve gate，Velocity 事件/路由接线为阶段4）。
+  - `virtual-backend/`：虚拟后端（未来，阶段3，包 `cn.cubegarden.icbm.caching.virtual`）。
+  - `control-service/`：缓存控制服务（master 缓存目录，包 `cn.cubegarden.icbm.caching.control`；阶段2 已实现 mTLS 控制平面、对象库、事件日志与 slave 复制）。
   - `auth-gateway/`：唯一执行 Mojang 正版验证的认证网关（未来）。
+  - `protocol/`：跨组件共享控制协议（包 `cn.cubegarden.icbm.caching.protocol`，纯 Java 25，netty/slf4j 由消费方提供；含包络/消息编解码、SnapshotObjectStore、ControlChannel 客户端基类）。
   - `docs/`：设计与协议文档；`build/`：Python 开发环境工具。
   - 跨组件共享的控制协议消息类型放 `cn.cubegarden.icbm.caching.protocol`（单侧实现，两侧复用，不得另写副本）。
 - 源模组只做权威世界侧工作（脏标记、快照、revision、主线程裁决）；不得在源模组内实现客户端会话、虚拟后端或缓存对象库职责（见 ARCHITECTURE.md 的“必须负责/不得负责”表）。

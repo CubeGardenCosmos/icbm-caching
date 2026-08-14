@@ -205,8 +205,16 @@ public final class Replicator {
                 return;
             }
         }
-        session.sendWithSequence(type, 0, event.seq(), encode(type, body));
+        session.sendWithSequence(type, 0, epochFor(event), event.seq(), encode(type, body));
         sub.lastReceivedSequence = Math.max(sub.lastReceivedSequence, event.seq());
+    }
+
+    /** 事件所属维度的当前 epoch（WORLD_EPOCH 推送携带新 epoch 本身）。 */
+    private long epochFor(EventLog.Event event) {
+        if (event.type() == EventLog.EventType.WORLD_EPOCH) {
+            return event.revision();
+        }
+        return this.store.dimensionEpoch(event.dimension());
     }
 
     private static byte[] encode(MessageType type, Object message) {

@@ -1,46 +1,50 @@
-"""构建/测试 fabric-source 模组（Gradle wrapper + JDK 25 + JVM 代理参数）。"""
+"""构建/测试各 Java 组件（Gradle wrapper + JDK 25 + JVM 代理参数）。
+
+fabric-source 为 Loom 模组；protocol/control-service/velocity-plugin 为纯 Java
+（protocol 经复合构建被其余组件消费）。
+"""
 
 from __future__ import annotations
 
 from ..infra import paths, shell
 
-_WRAPPER = paths.FABRIC_SOURCE / "gradlew"
+_ALL = ("protocol", "control-service", "velocity-plugin", "fabric-source")
 
 
-def _require_component() -> None:
-    if not _WRAPPER.exists():
-        raise RuntimeError("fabric-source 组件缺失（gradlew 未找到），请先提交组件骨架")
+def _gradlew(component: str) -> str:
+    wrapper = paths.component_root(component) / "gradlew"
+    if not wrapper.exists():
+        raise RuntimeError(f"组件 {component} 缺失（gradlew 未找到），请先提交组件骨架")
+    return str(wrapper)
 
 
-def run_build() -> None:
-    _require_component()
+def _run(component: str, task: str, *args: str) -> None:
     from . import jdk
 
     env = jdk.java_home_env()
-    print(f"构建 fabric-source（JAVA_HOME={env['JAVA_HOME']}）...")
+    print(f"[{component}] {task} ...")
     shell.run(
-        [str(_WRAPPER), "build", "--console=plain", "--stacktrace", *shell.jvm_proxy_args()],
-        cwd=str(paths.FABRIC_SOURCE),
+        [_gradlew(component), task, "--console=plain", *args, *shell.jvm_proxy_args()],
+        cwd=str(paths.component_root(component)),
         env=env,
     )
 
 
-def run_tests() -> None:
-    _require_component()
-    from . import jdk
+def run_build(components: tuple[str, ...] = _ALL) -> None:
+    for component in components:
+        _run(component, "build")
 
-    env = jdk.java_home_env()
-    print("运行 fabric-source 测试（gradlew test）...")
-    shell.run(
-        [str(_WRAPPER), "test", "--console=plain", *shell.jvm_proxy_args()],
-        cwd=str(paths.FABRIC_SOURCE),
-        env=env,
-    )
+
+def run_tests(components: tuple[str, ...] = _ALL) -> None:
+    for component in components:
+        _run(component, "test")
 
 
 def clean_artifacts() -> None:
     """删除各组件构建产物（保留源码）。"""
     import shutil
 
-    for d in (paths.FABRIC_SOURCE / "build", paths.FABRIC_SOURCE / ".gradle"):
-        shutil.rmtree(d, ignore_errors=True)
+    for component in _ALL:
+        root = paths.component_root(component)
+        for d in (root / "build", root / ".gradle"):
+            shutil.rmtree(d, ignore_errors=True)

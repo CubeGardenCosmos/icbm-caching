@@ -316,6 +316,12 @@ public final class SnapshotObjectStore implements AutoCloseable {
         return current == null || current.corrupt() ? 0 : current.committedUncompressedLength();
     }
 
+    /** committed 对象的 epoch（metadata 持久化值；无对象返回 0）。 */
+    public long committedEpoch(ChunkRef key) {
+        ChunkIndex current = this.index.get(key);
+        return current == null || current.corrupt() ? 0 : current.committedEpoch();
+    }
+
     /** 已知区块（含损坏）按区域枚举（ADMIN_INVALIDATE REGION 范围用）。 */
     public List<ChunkRef> chunksInRegion(DimensionRef dimension, int regionX, int regionZ) {
         List<ChunkRef> result = new ArrayList<>();

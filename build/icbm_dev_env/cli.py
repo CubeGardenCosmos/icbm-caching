@@ -25,8 +25,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="清理 build/workspace 与构建产物，腾出硬盘空间（破坏性，需确认）",
     )
     sub.add_parser("server", help="启动测试 Fabric 服务器（前台，Ctrl-C 退出）")
-    sub.add_parser("test", help="运行组件测试（fabric-source 的 gradlew test）")
-    sub.add_parser("build", help="构建组件（fabric-source 的 gradlew build）")
+    sub.add_parser(
+        "test",
+        help="运行全部组件测试（protocol/control-service/velocity-plugin/fabric-source）",
+    )
+    sub.add_parser(
+        "build",
+        help="构建全部组件（protocol/control-service/velocity-plugin/fabric-source）",
+    )
+    sub.add_parser(
+        "control",
+        help="启动控制服务（master 缓存目录，前台，端口 11420）",
+    )
+    sub.add_parser(
+        "certs",
+        help="生成 mTLS 证书（build/workspace/certs，CA/源/slave 角色）",
+    )
     return parser
 
 

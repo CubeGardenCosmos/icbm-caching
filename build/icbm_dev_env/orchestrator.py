@@ -1,8 +1,8 @@
-"""编排层：串联领域功能的 init/reinit/cleanup/server/test/build 步骤。"""
+"""编排层：串联领域功能的 init/reinit/cleanup/server/test/build/control 步骤。"""
 
 from __future__ import annotations
 
-from .domain import decompile, jdk, modbuild, refs, server
+from .domain import control, decompile, jdk, modbuild, refs, server
 from .infra import shell
 
 
@@ -17,6 +17,8 @@ class Orchestrator:
             "server": server.start_test_server,
             "test": modbuild.run_tests,
             "build": modbuild.run_build,
+            "control": control.start_control_service,
+            "certs": control.gen_certs,
         }[command]
         return int(handler() or 0)
 
@@ -29,7 +31,7 @@ class Orchestrator:
         try:
             modbuild.run_build()
         except Exception as exc:  # noqa: BLE001
-            print(f"[warn] 模组构建失败（不阻断 init）: {exc}")
+            print(f"[warn] 组件构建失败（不阻断 init）: {exc}")
 
     def reinit(self) -> None:
         from .infra import paths

@@ -374,6 +374,29 @@ class ControlServiceIntegrationTest {
     }
 
     @Test
+    void slaveCannotSendSourceOnlyMessages() throws Exception {
+        // 多个 slave（slave-a/slave-b 独立证书）都能连接受信 master，但不能冒充 SOURCE
+        try (TestClient source = new TestClient(SOURCE_ID, Role.SOURCE, FINGERPRINT, REGISTRY_FINGERPRINT,
+                serverPort(), sourceSsl());
+             TestClient slaveA = new TestClient("slave-a", Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+                     serverPort(), clientSsl("tls/slave-a.p12"));
+             TestClient slaveB = new TestClient("slave-b", Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+                     serverPort(), clientSsl("tls/slave-b.p12"))) {
+            source.awaitConnected();
+            slaveA.awaitConnected();
+            slaveB.awaitConnected();
+
+            // slave 发送 SOURCE 独占的 INVALIDATE → 协议违规 → 断连
+            slaveA.send(MessageType.INVALIDATE, slaveA.nextRequestId(),
+                    new Messages.Invalidate(DIM, 3, -1, 5, InvalidateReason.BLOCK_STATE));
+            Thread.sleep(300);
+            assertTrue(!slaveA.channel.isConnected(), "slave 不得以 SOURCE 身份发送写入消息");
+            assertTrue(slaveB.channel.isConnected(), "其他 slave 不受影响");
+            // slave-b 不能把 slave-a 作为身份来源：HELLO 后仅凭证书 CN 绑定角色，无法冒充
+        }
+    }
+
+    @Test
     void fingerprintMismatchSlaveRejected() throws Exception {
         try (TestClient slave = new TestClient(SLAVE_A, Role.VELOCITY, "different-modpack",
                 REGISTRY_FINGERPRINT, serverPort(), slaveSsl())) {

@@ -20,6 +20,21 @@ FINGERPRINTS = WORKSPACE / "fingerprints.json"
 
 # 组件目录（仓库根下的 Java/其他组件）
 FABRIC_SOURCE = REPO_ROOT / "fabric-source"
+PROTOCOL = REPO_ROOT / "protocol"
+CONTROL_SERVICE = REPO_ROOT / "control-service"
+VELOCITY_PLUGIN = REPO_ROOT / "velocity-plugin"
+
+# 全部 Java 组件（构建/测试/清理按此遍历；fabric-source 为 Loom 模组，其余为纯 Java）
+JAVA_COMPONENTS = (PROTOCOL, CONTROL_SERVICE, VELOCITY_PLUGIN, FABRIC_SOURCE)
+
+# 控制服务运行目录与 mTLS 证书
+CONTROL_RUN = WORKSPACE / "control-run"
+CERTS_DIR = WORKSPACE / "certs"
+
+
+def component_root(name: str) -> Path:
+    """按名字解析组件根（protocol/control-service/velocity-plugin/fabric-source）。"""
+    return REPO_ROOT / name
 
 
 def ensure_workspace() -> None:

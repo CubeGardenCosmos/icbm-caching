@@ -1,14 +1,20 @@
 # 阶段性任务与验收条件
 
-状态：全部未开始  
+状态：阶段0-2 完成（阶段3+ 未开始）
 原则：先证明源服权威性和回滚正确性，再扩大可预测操作和优化性能。
 
 ## 阶段 0：26.3 版本冻结
 
 - [x] 记录完整 Minecraft 26.3 构建、运行时 protocol、Java、Velocity、Fabric Loader、Fabric API 和 mappings 版本（见 [VERSION_FREEZE.md](VERSION_FREEZE.md)；Velocity 版本待 slave 阶段记录）。
-- [ ] 固定源服模组、配置、数据包和生成设置，并计算 modpack/registry/datapack fingerprint。
+- [x] 固定源服模组、配置、数据包和生成设置，并计算 modpack/registry/datapack fingerprint。
+      实现 modpackFingerprint 与 registryAndDatapackFingerprint（注册表 key+entry id + 数据包
+      内容哈希）；实际值部署时记录于 VERSION_FREEZE.md / build/workspace/fingerprints.json。
 - [ ] 建立源 Fabric、master 缓存目录、slave Velocity、虚拟后端和控制服务的隔离实验环境。
-- [ ] 建立 master 与至少两个地区 slave 的 mTLS 控制平面，验证 slave 之间不互信。
+      （源 Fabric、master 控制服务与 mTLS 证书就绪，`build/main.py control` 启动；slave
+      Velocity 路由与虚拟后端随阶段 3/4）
+- [x] 建立 master 与至少两个地区 slave 的 mTLS 控制平面，验证 slave 之间不互信。
+      证书 CN 绑定角色（source-server=SOURCE / slave-a、slave-b=VELOCITY）；slave 只与 master
+      对话，SOURCE 角色独占写入消息（角色违规断连测试覆盖）。
 - [ ] 部署独立 Auth Gateway；它是唯一执行 Mojang 正版验证的组件。
 - [ ] 确定玩家入口：默认 Auth Gateway -> master -> slave；只有在 master ticket 可安全兑换时才允许直接连接 slave。
 - [ ] 准备覆盖普通方块、方块实体、液体、活塞、红石、命令、世界生成和模组修改的测试世界。
@@ -35,18 +41,22 @@
 
 ## 阶段 2：后台控制协议
 
-- [ ] 按 CACHE_PROTOCOL.md 实现 mTLS、HELLO、WORLD_EPOCH、INVALIDATE、PUT_SNAPSHOT 和 RESOLVE_CHUNK。
-- [ ] 实现 schema、大小、哈希、序号、权限和 fingerprint 校验。
-- [ ] 实现对象库、requiredRevision 与 committedRevision 的持久恢复。
-- [ ] 实现连接断开、补发、范围失效和 epoch 切换。
-- [ ] 实现 master 到多个 slave 的订阅、流量控制、滞后检测和快照重拉。
+- [x] 按 CACHE_PROTOCOL.md 实现 mTLS、HELLO、WORLD_EPOCH、INVALIDATE、PUT_SNAPSHOT 和 RESOLVE_CHUNK。
+      共享协议模块（protocol/）+ 控制服务（control-service/）+ 源远端 sink + slave 复制客户端。
+- [x] 实现 schema、大小、哈希、序号、权限和 fingerprint 校验（golden 测试锁定线上布局）。
+- [x] 实现对象库、requiredRevision 与 committedRevision 的持久恢复（SnapshotObjectStore +
+      事件日志，重启恢复 + 损坏 fail closed）。
+- [x] 实现连接断开、补发、范围失效和 epoch 切换（outbox 重发、事件日志重放、ADMIN_INVALIDATE、
+      WORLD_EPOCH）。
+- [x] 实现 master 到多个 slave 的订阅、流量控制、滞后检测和快照重拉（SUBSCRIBE/ACK 窗口、
+      LAGGING 检测、RESYNC/日志重放）。
 
 验收：
 
-- [ ] INVALIDATE 到 snapshot committed 之间，RESOLVE_CHUNK 不返回旧 HIT。
-- [ ] 乱序、重放和损坏快照不能降低 revision 或覆盖新对象。
-- [ ] 控制服务不可用时，虚拟后端拒绝不确定基线。
-- [ ] 落后的 slave 不会服务低于 master requiredRevision 的区块。
+- [x] INVALIDATE 到 snapshot committed 之间，RESOLVE_CHUNK 不返回旧 HIT（控制服务集成测试）。
+- [x] 乱序、重放和损坏快照不能降低 revision 或覆盖新对象（对象库重放守卫 + wire 测试）。
+- [x] 控制服务不可用时，虚拟后端拒绝不确定基线（slave ServeGate fail closed；虚拟后端接入见阶段3）。
+- [x] 落后的 slave 不会服务低于 master requiredRevision 的区块（ServeGate STALE 测试）。
 
 ## 阶段 3：虚拟后端旁观者会话
 

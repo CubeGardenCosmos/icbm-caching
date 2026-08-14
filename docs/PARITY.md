@@ -9,3 +9,6 @@
 | 3 | 区块卸载时未发布修改 | vanilla 保存路径持久化区块 | 先失效（raise required）不提交，等待下次加载+修改后补快照 | 有意差异 | ARCHITECTURE §4.3「宁可冻结该区块或要求完整重同步」 |
 | 4 | epoch 触发 | 无（原版无 epoch 概念） | START / ROLLBACK / MODPACK_CHANGE / ADMIN 新 epoch 使旧快照失效 | 项目扩展 | CACHE_PROTOCOL WORLD_EPOCH |
 | 5 | secure chat | — | 不适用（本项目无聊天实现） | — | 与 icbm 服务端项目不同，本仓库不涉及聊天 |
+| 6 | slave 落后不服务 | 无（原版无缓存复制） | 落后 slave（committed < master required）拒绝服务该区块，直到收到新快照 | 项目扩展 | ServeGate STALE 判定；CACHE_PROTOCOL §6 |
+| 7 | 控制服务不可用 | 无 | slave/虚拟后端拒绝不确定基线（连接断开即停止服务） | 项目扩展 | fail closed；CACHE_PROTOCOL §6 |
+| 8 | 序号校验 | 无（原版协议无包序号） | 源→master 连接内序号严格递增（gap/重放断连）；跨连接由对象库单调性兜底 | 项目扩展 | CACHE_PROTOCOL §1 |

@@ -260,9 +260,10 @@ public final class PeerSession extends ChannelInboundHandlerAdapter {
         this.write(Envelope.of(type, requestId, this.config.serverId(), 0, seq, System.currentTimeMillis(), body));
     }
 
-    /** 推送：包络序号 = 事件序号（跨连接单调，供 slave ACK 水位使用）。 */
-    public void sendWithSequence(MessageType type, long requestId, long sequence, byte[] body) {
-        this.write(Envelope.of(type, requestId, this.config.serverId(), 0, sequence, System.currentTimeMillis(), body));
+    /** 推送：包络序号 = 事件序号（跨连接单调，供 slave ACK 水位使用）；worldEpoch = 事件所属维度 epoch。 */
+    public void sendWithSequence(MessageType type, long requestId, long worldEpoch, long sequence, byte[] body) {
+        this.write(Envelope.of(type, requestId, this.config.serverId(), worldEpoch, sequence,
+                System.currentTimeMillis(), body));
         this.outboundSequence = Math.max(this.outboundSequence, sequence);
     }
 
