@@ -86,16 +86,20 @@ public final class ControlServiceMain {
         }
         SourceConnector sourceRef = sourceConnector;
 
+        java.util.concurrent.CountDownLatch shutdown = new java.util.concurrent.CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             encapsulated.close();
             if (sourceRef != null) {
                 sourceRef.close();
             }
+            shutdown.countDown();
         }));
         LOGGER.info("[control] master 就绪：对象库={} events={} 封装通道={}:{} psk={}位 peerBindings={} backend={}",
                 config.storeRoot(), config.eventLogPath(), config.host(), encapsulated.port(),
                 config.psk().length(), config.roleBindings().keySet(),
                 config.backend() == null ? "未启用" : config.backend().host() + ":" + config.backend().port());
+        // 服务线程均为 daemon（测试友好）：独立进程形态主线程阻塞，Ctrl-C/TERM 经 shutdown hook 退出
+        shutdown.await();
     }
 
     private static byte[] randomKey() {

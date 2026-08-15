@@ -61,7 +61,7 @@ class RemoteSnapshotSinkTest {
         FakeMaster(int port, String secret, String uuidHex) throws Exception {
             this.client = new EncapsulatedChannelClient("127.0.0.1", port, "master-1", uuidHex, secret,
                     null, EncapsulatedChannelClient.HandshakeMode.SERVER_HELLO,
-                    5000, 100, false, new EncapsulatedChannelClient.Listener() {
+                    5000, 100, false, 0, new EncapsulatedChannelClient.Listener() {
                         @Override
                         public boolean onServerHello(Envelope envelope, byte[] body) {
                             Messages.Hello hello = EncapsulatedChannelClient.decode(MessageType.HELLO, body);
@@ -146,7 +146,7 @@ class RemoteSnapshotSinkTest {
         try (EncapsulatedChannelClient bad = new EncapsulatedChannelClient("127.0.0.1", sink.port(),
                 "evil-master", "0102030405060708090a0b0c0d0e0f10", "wrong-secret",
                 null, EncapsulatedChannelClient.HandshakeMode.SERVER_HELLO,
-                5000, 100, false, new EncapsulatedChannelClient.Listener() {
+                5000, 100, false, 0, new EncapsulatedChannelClient.Listener() {
                     @Override
                     public boolean onServerHello(Envelope envelope, byte[] body) {
                         return false;

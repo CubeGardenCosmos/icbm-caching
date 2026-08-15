@@ -15,6 +15,7 @@ MINECRAFT_ASSETS = WORKSPACE / "minecraft-assets"
 FABRIC_REF = WORKSPACE / "fabric"
 VELOCITY_REF = WORKSPACE / "velocity"
 SERVER_DIR = WORKSPACE / "server"
+SLAVE_SERVER = WORKSPACE / "slave-server"
 DRAFT_DIR = WORKSPACE / "draft"
 FINGERPRINTS = WORKSPACE / "fingerprints.json"
 

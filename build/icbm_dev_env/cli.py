@@ -45,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
         "vb",
         help="启动虚拟后端（阶段3 旁观者服务，前台；ICBM_VIRTUAL_BACKEND_CONFIG 指定配置）",
     )
+    sub.add_parser(
+        "slave",
+        help="启动 slave 服务器（build/workspace/slave-server，前台；256M 堆）",
+    )
+    sub.add_parser(
+        "e2e",
+        help="里程碑6 端到端验证：源服 setblock → 快照 → master → slave → RCON 玩家视角 + fail closed",
+    )
     return parser
 
 

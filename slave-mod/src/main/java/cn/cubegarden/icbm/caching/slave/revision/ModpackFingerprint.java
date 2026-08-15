@@ -25,8 +25,12 @@ public final class ModpackFingerprint {
     public static String compute(MinecraftServer server) {
         List<String> parts = new ArrayList<>();
         parts.add(SharedConstants.getCurrentVersion().name());
+        // icbm_*（icbm_source/icbm_slave/protocol）是框架组件，不是内容 modpack：排除，
+        // 否则 slave（装 icbm_slave）与源服（装 icbm_source）指纹永不相等、快照复用被拒。
+        // 内容 modpack = 版本 + 其余模组（fabric-api/第三方）+ 数据包 id。
         FabricLoader.getInstance().getAllMods().stream()
                 .map(mod -> mod.getMetadata().getId() + "@" + mod.getMetadata().getVersion().getFriendlyString())
+                .filter(id -> !id.startsWith("icbm_"))
                 .sorted()
                 .forEach(parts::add);
         server.getPackRepository().getSelectedIds().stream()
@@ -43,13 +47,16 @@ public final class ModpackFingerprint {
      */
     public static String registryAndDatapackFingerprint(MinecraftServer server) throws Exception {
         List<String> parts = new ArrayList<>();
+        List<String> registryParts = new ArrayList<>();
         server.registryAccess().registries().forEach(entry -> {
             List<String> ids = new ArrayList<>();
             entry.value().keySet().stream().map(Identifier::toString).sorted().forEach(ids::add);
-            parts.add(entry.key().identifier().toString() + "=" + String.join(",", ids));
+            registryParts.add(entry.key().identifier().toString() + "=" + String.join(",", ids));
         });
+
         List<String> packFiles = new ArrayList<>();
-        server.getResourceManager().listResources("", resourceId -> true).entrySet().stream()
+        // 排除 icbm_* 框架模组资源（两端模组 jar 不同 → 资源集合不同；内容指纹只看数据包）
+        server.getResourceManager().listResources("", resourceId -> !resourceId.getNamespace().startsWith("icbm_")).entrySet().stream()
                 .sorted(Comparator.comparing(e -> e.getKey().toString()))
                 .forEach(e -> {
                     try (InputStream in = e.getValue().open()) {
@@ -58,6 +65,8 @@ public final class ModpackFingerprint {
                         throw new IllegalStateException("数据包资源读取失败: " + e.getKey(), ex);
                     }
                 });
+        registryParts.sort(null);
+        parts.addAll(registryParts);
         parts.addAll(packFiles);
         return sha256Hex(String.join("|", parts));
     }

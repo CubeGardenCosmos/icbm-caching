@@ -61,6 +61,9 @@ public final class PeerRegistry {
             }
             if (!this.sourceModpackFingerprint.equals(modpackFingerprint)
                     || !this.sourceRegistryFingerprint.equals(registryFingerprint)) {
+                LOGGER.error("[control] 指纹不一致: slave modpack={} registry={} | source modpack={} registry={}",
+                        modpackFingerprint, registryFingerprint,
+                        this.sourceModpackFingerprint, this.sourceRegistryFingerprint);
                 return "slave fingerprint 与源不一致（拒绝快照复用）";
             }
         }

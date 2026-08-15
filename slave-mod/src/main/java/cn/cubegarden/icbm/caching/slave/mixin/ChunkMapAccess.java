@@ -1,4 +1,4 @@
-package cn.cubegarden.icbm.caching.slave.world;
+package cn.cubegarden.icbm.caching.slave.mixin;
 
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
@@ -6,7 +6,7 @@ import net.minecraft.world.entity.ai.village.poi.PoiManager;
 import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
-import org.spongepowered.asm.mixin.gen.Invoker;
+
 
 /**
  * ChunkMap 内部依赖访问（快照解析需要 level/poiManager/storageInfo；
@@ -21,7 +21,7 @@ public interface ChunkMapAccess {
     @Accessor("poiManager")
     PoiManager icbm_slave$poiManager();
 
-    /** storageInfo() 声明于 SimpleRegionStorage（public），此处以 invoker 显式转发。 */
-    @Invoker("storageInfo")
-    RegionStorageInfo icbm_slave$storageInfo();
+    // storageInfo() 为 SimpleRegionStorage 继承的 public 方法（ChunkMap.java:581），
+    // 直接 ((SimpleRegionStorage) this).storageInfo() 调用，无需 accessor（@Invoker 只认自身声明）。
+    // 注意：@Shadow 会破坏 accessor 接口 subtype（目标为类时报 is not an interface）。
 }

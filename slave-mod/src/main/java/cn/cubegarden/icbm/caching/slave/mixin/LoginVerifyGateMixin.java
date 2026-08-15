@@ -1,4 +1,4 @@
-package cn.cubegarden.icbm.caching.slave.network;
+package cn.cubegarden.icbm.caching.slave.mixin;
 
 import cn.cubegarden.icbm.caching.protocol.Messages;
 import cn.cubegarden.icbm.caching.slave.SlaveRuntime;

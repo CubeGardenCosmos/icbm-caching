@@ -36,7 +36,15 @@ public final class SlaveMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        ServerLifecycleEvents.SERVER_STARTING.register(this::setup);
+        // world 加载后装配（与源服 IcbmSource 同时序：registryAndDatapackFingerprint 需要
+        // 完整注册表；SERVER_STARTING 时注册表未就绪 → 指纹与源不一致）
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents.LOAD.register((server, world) -> {
+            if (!world.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)
+                    || SlaveRuntime.current() != null) {
+                return;
+            }
+            this.setup(server);
+        });
         ServerLifecycleEvents.SERVER_STOPPING.register(this::teardown);
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             SlaveRuntime runtime = SlaveRuntime.current();
@@ -100,6 +108,31 @@ public final class SlaveMod implements ModInitializer {
                 config.brand());
         SlaveRuntime.install(runtime);
         client.start();
+        // 初始同步闸门：装载 spawn 区块前等基线（WORLD_EPOCH/快照）；超时不阻断（fail closed）
+        try {
+            if (client.awaitInitialSync(8_000)) {
+                LOGGER.info("[icbm-slave] 初始同步完成（基线就绪，可服务区块）");
+            } else {
+                LOGGER.warn("[icbm-slave] 初始同步超时（区块装载可能未命中，fail closed）");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        // 主动装载出生点区块（官方 setChunkForced，ServerLevel.java:1517）：26.3 服务器启动
+        // 不保证自动加载 spawn chunks，快照注入需要一次区块装载请求才生效（e2e 玩家视角验证）。
+        try {
+            cn.cubegarden.icbm.caching.protocol.DimensionRef overworld =
+                    cn.cubegarden.icbm.caching.protocol.DimensionRef.of("minecraft", "overworld");
+            Messages.SpawnPoint spawn = spawnRegistry.spawnFor(overworld);
+            net.minecraft.server.level.ServerLevel overworldLevel = server.overworld();
+            overworldLevel.setChunkForced((int) Math.floor(spawn.x() / 16.0),
+                    (int) Math.floor(spawn.z() / 16.0), true);
+            LOGGER.info("[icbm-slave] 已强制装载出生点区块: {},{}（spawn={},{},{}）",
+                    (int) Math.floor(spawn.x() / 16.0), (int) Math.floor(spawn.z() / 16.0),
+                    spawn.x(), spawn.y(), spawn.z());
+        } catch (Exception e) {
+            LOGGER.error("[icbm-slave] 强制装载出生点区块失败（区块可能为空，fail closed）: {}", e.toString());
+        }
         LOGGER.info("[icbm-slave] 运行时就绪：master={}:{} serverName={} dims={} storeRoot={}",
                 config.masterHost(), config.masterPort(), config.serverName(),
                 config.dimensions(), config.storeRoot());

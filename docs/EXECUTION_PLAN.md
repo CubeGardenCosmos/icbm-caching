@@ -112,11 +112,26 @@
       （Velocity 插件入口延后：velocity-api 离线不可用，插件形态需真实 Velocity 26.3 环境，
       阶段 6/7 端到端装配时接线——独立进程形态 ControlServiceMain 完整承载 master 职责。）
 
-## 里程碑 6：源服复验 + 端到端（原阶段2）
+## 里程碑 6：源服复验 + 端到端（原阶段2）（已完成）
 
-- [ ] 新架构下源服 Mixin 目标、revision 持久化、快照发布复验（无回归）。
-- [ ] 全链路：源服 setblock → 快照 → master → slave 订阅 → 玩家经 slave 看到；
-      未命中/epoch/fingerprint 不匹配不展示旧区块；重复会话拒绝。
+- [x] 草稿 `draft/end-to-end-verification/` 三步流程（官方：MinecraftServer.java:482 出生点
+      区块装载 / SetBlockCommand / RCON；差异：端到端 = 真实三进程装配 + RCON 玩家视角代理；
+      快照到达后重载已装载区块不做（阶段 7 故障场景））。
+- [x] 复验无回归：全组件测试绿；MixinTargetVerifier 参数化测试（目标存在/缺失两类 fail closed）；
+      revision 持久化 round-trip/重启不倒退/脏合并测试既有覆盖。
+- [x] 全链路端到端：`build main.py e2e` 编排源服（fabric-server-launch + icbm-source jar-in-jar）+
+      master（ControlServiceMain 独立进程）+ slave（build/workspace/slave-server，256M 堆）；
+      源服 forceload+setblock → 「已提交快照」→ master 对象库 → slave 订阅「已装载快照」→
+      RCON `execute if block 0 64 0 minecraft:diamond_block` → Test passed（玩家视角命中）。
+- [x] 修复（端到端暴露）：ControlServiceMain 主线程阻塞（daemon 线程 JVM 退出）；EventLog
+      recover 尾部截断容错；源服 backend SO_TIMEOUT 握手后放宽（master 心跳 20s < 45s）；
+      EncapsulatedChannelClient 加心跳（master→源服方向，原缺失导致 45s 断连循环）；
+      jar-in-jar（include protocol 依赖）；slave mixins 包独立（mixin 子包）+ ChunkMapAccess
+      @Shadow→cast 修复；slave 指纹计算时序（world LOAD 后）；指纹确定性（排除 icbm_* 框架
+      模组 + registry 排序）；slave 初始同步闸门 + setChunkForced 强制装载出生点区块。
+- [x] 验收：setblock → 玩家经 slave 看到（RCON Test passed）；master 停止 → slave「master
+      断开（服务闸门关闭）」（fail closed）；重复会话拒绝由 AuthGatewayTest 既有覆盖。
+      （真实客户端登录/旁观注入随阶段 7 端到端装配；本里程碑 RCON 为无头玩家视角代理。）
 
 ## 里程碑 7：操作与故障（原阶段5-7，顺序不变）
 

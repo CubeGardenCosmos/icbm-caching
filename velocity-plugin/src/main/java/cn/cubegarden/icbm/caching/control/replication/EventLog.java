@@ -65,54 +65,62 @@ public final class EventLog {
         }
         try (DataInputStream in = new DataInputStream(new BufferedInputStream(Files.newInputStream(this.file)))) {
             while (true) {
-                long seq;
-                try {
-                    seq = in.readLong();
-                } catch (EOFException e) {
-                    break;
+                Event event = readEventOrNull(in);
+                if (event == null) {
+                    break; // 尾部截断（进程被强杀/磁盘写中断）：追加式日志崩溃恢复标准语义
                 }
-                byte typeId = in.readByte();
-                EventType type = null;
-                for (EventType t : EventType.values()) {
-                    if (t.id == typeId) {
-                        type = t;
-                        break;
-                    }
-                }
-                if (type == null) {
-                    throw new IOException("events.log 未知事件类型: " + typeId);
-                }
-                DimensionRef dimension = null;
-                ChunkRef chunk = null;
-                long revision = 0;
-                String hash = "";
-                String fingerprint = "";
-                Messages.SpawnPoint spawn = Messages.SpawnPoint.DEFAULT;
-                switch (type) {
-                    case WORLD_EPOCH -> {
-                        dimension = readDimension(in);
-                        revision = in.readLong();
-                        fingerprint = readString(in);
-                        spawn = readSpawn(in);
-                    }
-                    case INVALIDATE -> {
-                        dimension = readDimension(in);
-                        chunk = new ChunkRef(dimension, in.readInt(), in.readInt());
-                        revision = in.readLong();
-                    }
-                    case SNAPSHOT_COMMITTED -> {
-                        dimension = readDimension(in);
-                        chunk = new ChunkRef(dimension, in.readInt(), in.readInt());
-                        revision = in.readLong();
-                        hash = readString(in);
-                    }
-                }
-                this.events.add(new Event(seq, type, dimension, chunk, revision, hash, fingerprint,
-                        spawn));
-                this.nextSeq = seq + 1;
+                this.events.add(event);
+                this.nextSeq = event.seq() + 1;
             }
         }
         LOGGER.info("[control] events.log 恢复: {} 条，nextSeq={}", this.events.size(), this.nextSeq);
+    }
+
+    /** 读一条事件；EOF/截断（含记录中部）→ null（容忍不完整尾部，不抛）。 */
+    private Event readEventOrNull(DataInputStream in) throws IOException {
+        try {
+            long seq = in.readLong();
+            byte typeId = in.readByte();
+            EventType type = null;
+            for (EventType t : EventType.values()) {
+                if (t.id == typeId) {
+                    type = t;
+                    break;
+                }
+            }
+            if (type == null) {
+                throw new IOException("events.log 未知事件类型: " + typeId);
+            }
+            DimensionRef dimension = null;
+            ChunkRef chunk = null;
+            long revision = 0;
+            String hash = "";
+            String fingerprint = "";
+            Messages.SpawnPoint spawn = Messages.SpawnPoint.DEFAULT;
+            switch (type) {
+                case WORLD_EPOCH -> {
+                    dimension = readDimension(in);
+                    revision = in.readLong();
+                    fingerprint = readString(in);
+                    spawn = readSpawn(in);
+                }
+                case INVALIDATE -> {
+                    dimension = readDimension(in);
+                    chunk = new ChunkRef(dimension, in.readInt(), in.readInt());
+                    revision = in.readLong();
+                }
+                case SNAPSHOT_COMMITTED -> {
+                    dimension = readDimension(in);
+                    chunk = new ChunkRef(dimension, in.readInt(), in.readInt());
+                    revision = in.readLong();
+                    hash = readString(in);
+                }
+            }
+            return new Event(seq, type, dimension, chunk, revision, hash, fingerprint, spawn);
+        } catch (EOFException e) {
+            LOGGER.warn("[control] events.log 尾部截断（容忍，忽略剩余）");
+            return null;
+        }
     }
 
     public synchronized long append(EventType type, DimensionRef dimension, ChunkRef chunk,

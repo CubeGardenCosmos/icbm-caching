@@ -141,6 +141,9 @@ public final class BackendControlSession implements AutoCloseable {
                     }
                     this.active = true;
                     this.listener.onConnected();
+                    // 握手期 SO_TIMEOUT 仅为 HELLO 等待；ACTIVE 后放宽到 3×心跳（master 心跳
+                    // interval=20s < 45s，读超时防挂死且不误断）
+                    this.socket.setSoTimeout((int) (this.heartbeatIntervalMillis * 3));
                     break;
                 }
             }

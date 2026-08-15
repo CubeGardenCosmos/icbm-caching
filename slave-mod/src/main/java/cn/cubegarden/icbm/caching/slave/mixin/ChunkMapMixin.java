@@ -1,4 +1,4 @@
-package cn.cubegarden.icbm.caching.slave.world;
+package cn.cubegarden.icbm.caching.slave.mixin;
 
 import cn.cubegarden.icbm.caching.slave.SlaveRuntime;
 import java.util.concurrent.CompletableFuture;

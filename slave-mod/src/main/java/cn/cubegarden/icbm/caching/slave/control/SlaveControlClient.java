@@ -42,6 +42,7 @@ public final class SlaveControlClient implements AutoCloseable {
     private final Set<DimensionRef> subscribed;
     private final int ackBatchSize;
     private final AtomicLong requestIds = new AtomicLong(1);
+    private final java.util.concurrent.CountDownLatch initialSync = new java.util.concurrent.CountDownLatch(1);
     private final String minecraftVersion;
     private final int runtimeProtocol;
     private final String fabricLoaderVersion;
@@ -141,6 +142,14 @@ public final class SlaveControlClient implements AutoCloseable {
                         new Messages.SessionClosed(playerUuid, sessionId, reason)));
     }
 
+    /** 等待首轮初始同步（master 连接 + WORLD_EPOCH/首个快照到达）。Server thread 在
+     *  装载 spawn 区块前调用：ServeGate 语义要求先同步基线再服务区块（未同步 → 装载
+     *  命中空 EMPTY，之后无官方重载 API）。超时返回 false（不阻断启动，区块装载可能
+     *  未命中 → 空区块，fail closed 语义不变）。 */
+    public boolean awaitInitialSync(long timeoutMillis) throws InterruptedException {
+        return this.initialSync.await(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
+
     private void subscribe() {
         this.channel.send(MessageType.SUBSCRIBE, this.requestIds.incrementAndGet(), 0,
                 EncapsulatedChannelClient.encode(MessageType.SUBSCRIBE,
@@ -163,6 +172,7 @@ public final class SlaveControlClient implements AutoCloseable {
     private void handleWorldEpoch(Messages.WorldEpoch msg, long sequence) {
         this.store.announceEpoch(msg.dimension(), msg.worldEpoch());
         this.spawnRegistry.onWorldEpoch(msg.dimension(), msg.spawn());
+        this.initialSync.countDown();
         this.maybeAck(sequence);
     }
 
@@ -177,10 +187,11 @@ public final class SlaveControlClient implements AutoCloseable {
         if (result == PutResult.OK) {
             try {
                 this.store.commit(key, snapshot.revision());
-                LOGGER.debug("[icbm-slave] 已装载快照: {} rev={} epoch={}", key, snapshot.revision(), epoch);
+                LOGGER.info("[icbm-slave] 已装载快照: {} rev={} epoch={}", key, snapshot.revision(), epoch);
             } catch (IllegalStateException e) {
                 LOGGER.error("[icbm-slave] committed 失败（fail closed）: {}: {}", key, e.getMessage());
             }
+            this.initialSync.countDown();
         } else {
             LOGGER.warn("[icbm-slave] 快照推送被拒（保持 required，不覆盖）: {} rev={} result={}",
                     key, snapshot.revision(), result);

@@ -59,7 +59,7 @@ public final class SourceConnector implements AutoCloseable {
                 this.backend.host(), this.backend.port(),
                 this.config.serverId(), masterUuidHex(), this.backend.forwardingSecret(),
                 null, EncapsulatedChannelClient.HandshakeMode.SERVER_HELLO,
-                60_000, 3_000, true, new ClientListener());
+                60_000, 3_000, true, this.config.heartbeatIntervalMillis(), new ClientListener());
     }
 
     /** master 的 AUTH 身份（由 serverId 派生，稳定）。 */

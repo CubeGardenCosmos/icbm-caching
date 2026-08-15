@@ -17,10 +17,31 @@ public final class MixinTargetVerifier {
     private MixinTargetVerifier() {
     }
 
-    /** 验证本模组依赖的全部 Mixin 目标与方法。 */
+    /** 验证本模组依赖的全部 Mixin 目标与方法（真实 26.3 目标，里程碑 6 复验）。 */
     public static boolean verify() {
-        return checkMethod("net.minecraft.world.level.chunk.ChunkAccess", "markUnsaved")
-                && checkClass("net.minecraft.world.level.chunk.storage.SerializableChunkData");
+        return verify(new TargetSet(
+                java.util.Set.of("net.minecraft.world.level.chunk.storage.SerializableChunkData"),
+                java.util.Set.of("net.minecraft.world.level.chunk.ChunkAccess#markUnsaved")));
+    }
+
+    /** 目标集合（class 全名；method 用 {@code className#methodName}，便于参数化测试）。 */
+    public record TargetSet(java.util.Set<String> classes, java.util.Set<String> methods) {
+    }
+
+    /** 参数化自检：任一目标缺失（反射/链接失败）→ false（fail closed，禁用缓存命中）。 */
+    public static boolean verify(TargetSet targets) {
+        for (String method : targets.methods()) {
+            int sep = method.indexOf('#');
+            if (sep < 0 || !checkMethod(method.substring(0, sep), method.substring(sep + 1))) {
+                return false;
+            }
+        }
+        for (String className : targets.classes()) {
+            if (!checkClass(className)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean checkMethod(String className, String methodName) {

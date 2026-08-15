@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .domain import control, decompile, jdk, modbuild, refs, registry_capture, server
-from .domain import virtual_backend
+from .domain import control, decompile, e2e, jdk, modbuild, refs, registry_capture, server
+from .domain import slave_server, virtual_backend
 from .infra import shell
 
 
@@ -21,6 +21,8 @@ class Orchestrator:
             "control": control.start_control_service,
             "capture-registry": registry_capture.capture_registry,
             "vb": virtual_backend.start_virtual_backend,
+            "slave": slave_server.start_slave_server,
+            "e2e": e2e.run_e2e,
         }[command]
         return int(handler() or 0)
 

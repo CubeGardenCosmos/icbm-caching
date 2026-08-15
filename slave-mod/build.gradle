@@ -17,6 +17,8 @@ dependencies {
 
 	// 共享控制协议模块（includeBuild('../protocol') 提供；netty/slf4j 由 Minecraft/loader 提供）
 	implementation "cn.cubegarden.icbm.caching:protocol:${project.protocol_version}"
+	// jar-in-jar：protocol 类随模组分发（Composite includeBuild 提供；Knot 运行时加载）
+	include "cn.cubegarden.icbm.caching:protocol:${project.protocol_version}"
 
 	testImplementation platform('org.junit:junit-bom:5.11.0')
 	testImplementation 'org.junit.jupiter:junit-jupiter'

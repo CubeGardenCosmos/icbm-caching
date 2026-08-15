@@ -1,4 +1,4 @@
-package cn.cubegarden.icbm.caching.slave.persistence;
+package cn.cubegarden.icbm.caching.slave.mixin;
 
 import cn.cubegarden.icbm.caching.slave.SlaveRuntime;
 import net.minecraft.server.level.ChunkMap;

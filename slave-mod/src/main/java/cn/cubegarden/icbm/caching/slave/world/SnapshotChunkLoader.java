@@ -1,6 +1,7 @@
 package cn.cubegarden.icbm.caching.slave.world;
 
 import cn.cubegarden.icbm.caching.protocol.ChunkRef;
+import cn.cubegarden.icbm.caching.slave.mixin.ChunkMapAccess;
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
 import cn.cubegarden.icbm.caching.protocol.store.SnapshotObjectStore;
 import java.io.ByteArrayInputStream;
@@ -104,7 +105,7 @@ public final class SnapshotChunkLoader {
             }
             ChunkMapAccess chunkMap = (ChunkMapAccess) ((ServerChunkCache) level.getChunkSource()).chunkMap;
             ChunkAccess chunk = data.read(level, chunkMap.icbm_slave$poiManager(),
-                    chunkMap.icbm_slave$storageInfo(), pos);
+                    ((net.minecraft.world.level.chunk.storage.SimpleRegionStorage) chunkMap).storageInfo(), pos);
             if (chunk.getPersistedStatus().isBefore(ChunkStatus.FULL)) {
                 LOGGER.warn("[icbm-slave] 快照状态非 FULL（以快照为准）: {} status={}",
                         key, chunk.getPersistedStatus());

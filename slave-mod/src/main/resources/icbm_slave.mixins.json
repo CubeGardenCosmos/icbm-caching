@@ -1,15 +1,16 @@
 {
   "required": true,
   "minVersion": "0.8.5",
-  "package": "cn.cubegarden.icbm.caching.slave",
+  "package": "cn.cubegarden.icbm.caching.slave.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "brand.MinecraftServerBrandMixin",
-    "network.LoginVerifyGateMixin",
-    "network.PlayerBoundsMixin",
-    "network.SpectateGateMixin",
-    "persistence.SaveGateMixin",
-    "world.ChunkMapMixin"
+    "MinecraftServerBrandMixin",
+    "LoginVerifyGateMixin",
+    "PlayerBoundsMixin",
+    "SpectateGateMixin",
+    "SaveGateMixin",
+    "ChunkMapMixin",
+    "ChunkMapAccess"
   ],
   "injectors": {
     "defaultRequire": 1

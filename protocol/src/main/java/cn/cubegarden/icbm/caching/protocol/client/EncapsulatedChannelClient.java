@@ -129,6 +129,8 @@ public class EncapsulatedChannelClient implements AutoCloseable {
     private volatile boolean handshakeRejected;
     private Thread readThread;
     private Thread connectThread;
+    private volatile Thread heartbeatThread;
+    private final long heartbeatIntervalMillis;
 
     public EncapsulatedChannelClient(
             String host,
@@ -143,7 +145,7 @@ public class EncapsulatedChannelClient implements AutoCloseable {
             Listener listener
     ) {
         this(host, port, sourceServerId, uuidHex, psk, helloConfig, HandshakeMode.CLIENT_HELLO,
-                readTimeoutMillis, reconnectBackoffMillis, autoReconnect, listener);
+                readTimeoutMillis, reconnectBackoffMillis, autoReconnect, 0, listener);
     }
 
     public EncapsulatedChannelClient(
@@ -157,6 +159,7 @@ public class EncapsulatedChannelClient implements AutoCloseable {
             long readTimeoutMillis,
             long reconnectBackoffMillis,
             boolean autoReconnect,
+            long heartbeatIntervalMillis,
             Listener listener
     ) {
         this.host = host;
@@ -169,6 +172,7 @@ public class EncapsulatedChannelClient implements AutoCloseable {
         this.readTimeoutMillis = readTimeoutMillis;
         this.reconnectBackoffMillis = reconnectBackoffMillis;
         this.autoReconnect = autoReconnect;
+        this.heartbeatIntervalMillis = heartbeatIntervalMillis;
         this.listener = listener;
     }
 
@@ -311,6 +315,32 @@ public class EncapsulatedChannelClient implements AutoCloseable {
         this.readThread = new Thread(this::readLoop, "icbm-encap-reader-" + this.sourceServerId);
         this.readThread.setDaemon(true);
         this.readThread.start();
+        if (this.heartbeatIntervalMillis > 0) {
+            this.heartbeatThread = new Thread(this::heartbeatLoop, "icbm-encap-heartbeat-" + this.sourceServerId);
+            this.heartbeatThread.setDaemon(true);
+            this.heartbeatThread.start();
+        }
+    }
+
+    /** 定期 HEARTBEAT（对端读超时防误断；HEARTBEAT 不受序号递增约束，seq=0）。 */
+    private void heartbeatLoop() {
+        while (!this.closed && this.socket != null && !this.socket.isClosed()) {
+            try {
+                Thread.sleep(this.heartbeatIntervalMillis);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            try {
+                synchronized (this.out) {
+                    this.writeFrame(MessageType.HEARTBEAT, 0, 0,
+                            encode(MessageType.HEARTBEAT,
+                                    new Messages.Heartbeat(System.currentTimeMillis(), 0)));
+                }
+            } catch (IOException e) {
+                LOGGER.debug("[icbm-encap] 心跳发送失败（连接将自愈）: {}", e.getMessage());
+            }
+        }
     }
 
     private void readLoop() {

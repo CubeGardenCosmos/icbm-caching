@@ -90,6 +90,9 @@ HELLO 包还必须携带：
 
 指纹不一致、角色与鉴权结果不一致、版本/runtimeProtocol 不匹配时，master 拒绝连接
 （HELLO_ACK accepted=false）与快照复用。slave 的指纹必须与已注册源（按 serverName 隔离）的指纹一致。
+指纹计算排除 icbm_* 框架模组（icbm_source/icbm_slave 是框架组件非内容 modpack；其资源也不计入
+registryAndDatapack 指纹）——slave（装 icbm_slave）与源服（装 icbm_source）共享同一内容 modpack
+时指纹相等（里程碑 6 端到端验证）；registry 部分按 key 排序（registries() 迭代序不稳定）。
 slave 以 SLAVE 角色订阅并维护本地对象库，装载前按 §6 服务闸门判定（master 连接存活 +
 committed≥required + epoch 匹配），否则不展示旧区块（fail closed）。
 

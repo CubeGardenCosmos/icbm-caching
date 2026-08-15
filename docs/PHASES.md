@@ -85,7 +85,11 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
 - [ ] 未经 master 验证的客户端无法进入任何后端；重复会话被拒绝。
 - [ ] 后端故障时路由安全失败且不服务不确定数据。
 
-## 阶段 4：slave 后端会话（Fabric 模组化）
+## 阶段 4：slave 后端会话（Fabric 模组化）（里程碑 6 端到端验证：slave-server 真实装配）
+
+- [x] slave 模组在原生 MC 服务器上实现 26.3 状态机与 committed snapshot 装载（迁移原阶段3 技术，
+      移除独立 netty 进程依赖或保留为只读变体）。（真实装配：build/workspace/slave-server +
+      256M 堆 + jar-in-jar；初始同步闸门 + setChunkForced 装载出生点快照）
 
 - [ ] slave 模组在原生 MC 服务器上实现 26.3 状态机与 committed snapshot 装载（迁移原阶段3 技术，
       移除独立 netty 进程依赖或保留为只读变体）。
