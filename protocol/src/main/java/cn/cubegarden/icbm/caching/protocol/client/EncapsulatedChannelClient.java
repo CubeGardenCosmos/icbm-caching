@@ -83,6 +83,11 @@ public class EncapsulatedChannelClient implements AutoCloseable {
         default void onLoginVerifyResponse(byte[] body) {
         }
 
+        /** MC_PASSTHROUGH 流（streamId=2，权威会话）：对端明文 MC 报文原始 body
+         *  （[流序号(8)][长度(4)][报文]，CACHE_PROTOCOL §1.1；字节透传不解析）。 */
+        default void onMcPacket(byte[] body) {
+        }
+
         /** 连接关闭（非拒绝路径）。 */
         default void onDisconnected(Throwable cause) {
         }
@@ -319,7 +324,7 @@ public class EncapsulatedChannelClient implements AutoCloseable {
                         this.listener.onMessage(envelope.messageType(), envelope, envelope.body());
                     }
                     case LOGIN_VERIFY -> this.listener.onLoginVerifyResponse(decrypted.body());
-                    case MC_PASSTHROUGH -> throw new IOException("非控制流帧: " + decrypted.stream());
+                    case MC_PASSTHROUGH -> this.listener.onMcPacket(decrypted.body());
                 }
             }
         } catch (IOException e) {
@@ -388,6 +393,26 @@ public class EncapsulatedChannelClient implements AutoCloseable {
             LOGGER.warn("[icbm-encap] 发送失败: {}", e.getMessage());
             this.listener.onDisconnected(e);
             this.closeSocket();
+            return false;
+        }
+    }
+
+    /** 发送 MC_PASSTHROUGH 流（streamId=2）原始 body（无包络；权威会话明文 MC 报文）。 */
+    public boolean sendMcPassthrough(byte[] body) {
+        DataOutputStream out = this.out;
+        if (out == null || !this.isConnected() || this.encryptCipher == null) {
+            return false;
+        }
+        try {
+            synchronized (out) {
+                byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.MC_PASSTHROUGH, body);
+                out.write(frame);
+                out.flush();
+            }
+            return true;
+        } catch (IOException e) {
+            LOGGER.warn("[icbm-encap] MC_PASSTHROUGH 发送失败: {}", e.getMessage());
+            this.listener.onDisconnected(e);
             return false;
         }
     }

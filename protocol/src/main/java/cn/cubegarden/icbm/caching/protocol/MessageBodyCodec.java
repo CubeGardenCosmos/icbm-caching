@@ -361,6 +361,12 @@ public final class MessageBodyCodec {
                     writeUuid(out, id.nonce());
                     out.writeLong(id.expiresAt());
                     writeBytes(out, id.signature());
+                    out.writeShort(id.profileProperties().length);
+                    for (Messages.ProfileProperty property : id.profileProperties()) {
+                        writeString(out, property.name());
+                        writeString(out, property.value());
+                        writeString(out, property.signature());
+                    }
                 }
             }
 
@@ -372,8 +378,18 @@ public final class MessageBodyCodec {
                 if (verified) {
                     identity = new Messages.MasterVerifiedIdentity(
                             readString(in), readString(in), readString(in),
-                            readUuid(in), readString(in), readUuid(in), in.readLong(), readBytes(in)
+                            readUuid(in), readString(in), readUuid(in), in.readLong(), readBytes(in),
+                            null
                     );
+                    Messages.ProfileProperty[] properties = new Messages.ProfileProperty[in.readShort() & 0xFFFF];
+                    for (int i = 0; i < properties.length; i++) {
+                        properties[i] = new Messages.ProfileProperty(
+                                readString(in), readString(in), readString(in));
+                    }
+                    identity = new Messages.MasterVerifiedIdentity(
+                            identity.issuer(), identity.keyId(), identity.audience(),
+                            identity.playerUuid(), identity.sessionId(), identity.nonce(),
+                            identity.expiresAt(), identity.signature(), properties);
                 }
                 return new Messages.LoginVerifyRes(verified, reason, identity);
             }

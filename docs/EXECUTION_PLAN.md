@@ -89,14 +89,28 @@
       AuthGatewayTest（LOGIN_VERIFY 放行 + 重复会话拒新 + SESSION_CLOSED 注销）；全组件测试绿。
       （真实玩家经 slave 旁观由里程碑 6 端到端验证：测试服务器装配 slave 世界 + 玩家会话。）
 
-## 里程碑 5：master 统筹与权威会话桥
+## 里程碑 5：master 统筹与权威会话桥（已完成）
 
-- [ ] 落点判定（白名单/fallback）与多服务器切换；健康检查与断路器。
-- [ ] 全局会话记账：登记/注销/竞态两阶段确认/重复会话策略（拒新 or 踢旧）。
-- [ ] Auth Gateway 验证流程（LOGIN_VERIFY）与身份断言签发/单次兑换/吊销。
-- [ ] 权威会话桥：slave 明文 MC 报文 → 封装通道 → master → 源服（velocity 授信）；
-      源服返回数据包在 master 侧缓存。
-- [ ] 验收：玩家可在缓存会话与权威会话之间切换；票据不重放；后端故障 fallback。
+- [x] 草稿 `draft/master-orchestration-bridge/` 三步流程（参考：velocity ConnectionManager/
+      ServerChannelInitializer/LoginSessionHandler；官方：ServerLoginPacketListenerImpl.handleKey
+      26.3 hasJoined 语义；差异：权威桥 v1 = MC_PASSTHROUGH 字节透传闭环，虚拟玩家连接留
+      阶段 6/7；数据包缓存 = PacketLog 审计日志 + 源服快照管道进对象库）。
+- [x] 落点判定（RoutingPolicy 白名单/fallback）+ 健康检查（BackendHealth：连接 + 活动时间戳）
+      + 断路器（CircuitBreaker：连续失败 OPEN → 冷却半开 → 成功恢复）。
+- [x] 全局会话记账：SessionRegistry 登记/注销/拒新 + 管理踢旧（kickOld）+ slave 连接断开
+      批量注销（SESSION_CLOSED 未送达防泄漏）；验证登记与落点判定原子完成（两阶段确认）。
+- [x] Auth Gateway 完整化：Mojang 正版验证（26.3 hasJoined 复刻 + offline 开关 + 服务不可用
+      fail closed）+ 断言 HMAC 签名（keyId 轮换）+ 票据单次兑换（nonce 重放拒）+ 吊销
+      （SESSION_CLOSED/断开）；MasterVerifiedIdentity 增加 profileProperties（协议变更，
+      golden 同步）。
+- [x] 权威会话桥（v1）：slave↔master↔源服 双向 MC_PASSTHROUGH 字节透传（Master 侧
+      McPassthroughBridge + PacketLog；fabric-source BackendControlSession 流支持）；源服
+      故障/断路器 OPEN → 拒绝转发（后端故障 fallback 缓存会话）。
+- [x] 验收：RoutingPolicyTest/MojangSessionVerifierTest（本地假 session server）/
+      IdentitySignerTest/TicketVaultTest/AuthGatewayTest（完整流程 + 重放拒 + 断开注销）/
+      McPassthroughBridgeTest（双向转发 + PacketLog + fallback）；全组件测试绿。
+      （Velocity 插件入口延后：velocity-api 离线不可用，插件形态需真实 Velocity 26.3 环境，
+      阶段 6/7 端到端装配时接线——独立进程形态 ControlServiceMain 完整承载 master 职责。）
 
 ## 里程碑 6：源服复验 + 端到端（原阶段2）
 

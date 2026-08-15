@@ -40,9 +40,10 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
       预测，不做世界计算（不 worldgen/tick 模拟/持久化写回）；256M JVM 与磁盘缓存约束落地
       （SnapshotObjectStore 磁盘 + 注入即释放 + 自检）；封装通道客户端（公共密码+UUID，SLAVE 角色
       订阅/ACK/LOGIN_VERIFY 递交）；区块注入（scheduleChunkLoad/applyStep Mixin）与 fail closed。
-- [x] Auth Gateway 归 master（最小版）：slave 终止登录握手后递验证材料，master 记账
-      （防同一玩家加入多个 slave，SessionRegistry 重复会话拒新）+ offline 放行；LOGIN_VERIFY 系列
-      消息定义已落地（CACHE_PROTOCOL §9），Mojang 正版验证/签名/单次兑换随里程碑 5。
+- [x] Auth Gateway 归 master（里程碑 4 最小版 + 里程碑 5 完整化）：slave 终止登录握手后递
+      验证材料，master 记账（SessionRegistry 重复会话拒新/踢旧/断开自动注销）+ Mojang 正版验证
+      （26.3 hasJoined 复刻 + offline 开关）+ 断言 HMAC 签名（keyId 轮换）+ 票据单次兑换
+      （nonce 重放拒）+ 吊销（SESSION_CLOSED/断开）；MasterVerifiedIdentity 增加 profileProperties。
 
 验收：
 
@@ -64,14 +65,19 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
 - [ ] 玩家、刻、命令、活塞、液体、世界生成、方块实体和模组修改仍递增正确 chunk 的 revision。
 - [ ] 重启后 revision 不倒退；无法证明时产生新 epoch。
 
-## 阶段 3：master 统筹控制平面
+## 阶段 3：master 统筹控制平面（里程碑 5 完成；独立进程形态 ControlServiceMain）
 
-- [ ] master 插件实现落点判定（白名单/fallback）与多服务器切换（fallback、/server、transfer）。
+- [x] 落点判定（RoutingPolicy 白名单/fallback）与多服务器切换（重复会话拒新/踢旧；会话模式
+      缓存 ↔ 权威由 slave 发起 MC_PASSTHROUGH 流 + master 授权）。
       （master 单端口封装通道的会话转发：权威会话时 slave 明文 MC 报文 → master → 源服。）
-- [ ] 全局会话记账：验证通过登记、登出/断开注销、竞态两阶段确认、重复会话踢旧/拒新策略。
-- [ ] Auth Gateway 验证流程（LOGIN_VERIFY_REQ/RES）与身份断言签发/单次兑换/吊销。
-- [ ] 健康检查与断路器：后端不可用时落点 fallback，不服务不确定数据。
-- [ ] 源服数据包缓存：权威会话时源服返回的数据包在 master 侧缓存（形成快照供缓存会话）。
+- [x] 全局会话记账：验证通过登记、登出/断开注销、竞态两阶段确认（登记+落点原子）、
+      重复会话拒新/踢旧策略。
+- [x] Auth Gateway 验证流程（LOGIN_VERIFY_REQ/RES）与身份断言签发/单次兑换/吊销。
+- [x] 健康检查与断路器：后端不可用时落点 fallback，不服务不确定数据。
+- [x] 源服数据包缓存（PacketLog 审计 + 源服快照管道进对象库）：权威会话时源服返回的数据包
+      在 master 侧缓存（形成快照供缓存会话）。
+- [ ] Velocity 插件入口：独立进程形态完整；插件形态（velocity-api）需真实 Velocity 26.3
+      环境，随阶段 6/7 端到端装配接线。
 
 验收：
 

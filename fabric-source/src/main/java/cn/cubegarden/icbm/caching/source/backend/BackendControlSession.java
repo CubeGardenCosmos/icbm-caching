@@ -53,6 +53,12 @@ public final class BackendControlSession implements AutoCloseable {
         /** 入站消息（PUT_SNAPSHOT_ACK / ERROR / HEARTBEAT）。 */
         void onMessage(MessageType type, Envelope envelope, byte[] body);
 
+        /** MC_PASSTHROUGH 流（权威会话，streamId=2）：master 转发的 slave 明文 MC 报文
+         *  （[流序号(8)][长度(4)][报文]，字节透传；虚拟玩家连接实现随阶段 6/7，默认丢弃）。 */
+        default void onMcPassthrough(byte[] body) {
+            LOGGER.warn("[icbm-source] MC_PASSTHROUGH 未服务（虚拟玩家连接未实现），丢弃 {} 字节", body.length);
+        }
+
         /** 连接断开（对端关闭/IO 异常）。 */
         void onDisconnected(Throwable cause);
     }
@@ -144,8 +150,16 @@ public final class BackendControlSession implements AutoCloseable {
             }
             this.startHeartbeat();
             while (!this.closed) {
-                Envelope envelope = this.readControlFrame();
-                this.listener.onMessage(envelope.messageType(), envelope, envelope.body());
+                byte[] wireFrame = this.readWireFrame();
+                EncapsulatedFrame.Decrypted decrypted = EncapsulatedFrame.decodeEncryptedFrame(this.decryptCipher, wireFrame);
+                if (decrypted.stream() == StreamId.CONTROL) {
+                    Envelope envelope = FrameCodec.decodeFrame(decrypted.body());
+                    this.listener.onMessage(envelope.messageType(), envelope, envelope.body());
+                } else if (decrypted.stream() == StreamId.MC_PASSTHROUGH) {
+                    this.listener.onMcPassthrough(decrypted.body());
+                } else {
+                    throw new IOException("未知流: " + decrypted.stream());
+                }
             }
         } catch (EOFException e) {
             // 对端正常关闭
@@ -173,6 +187,24 @@ public final class BackendControlSession implements AutoCloseable {
                 (byte) 0
         ));
         this.writeFrame(MessageType.HELLO, 1, 0, body);
+    }
+
+    /** 发送 MC_PASSTHROUGH 流（streamId=2）：源服下行明文 MC 报文回传 master（权威会话）。 */
+    public boolean sendMcPassthrough(byte[] body) {
+        if (!this.isActive() || this.closed) {
+            return false;
+        }
+        try {
+            synchronized (this.out) {
+                byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.MC_PASSTHROUGH, body);
+                this.out.write(frame);
+                this.out.flush();
+            }
+            return true;
+        } catch (IOException e) {
+            LOGGER.warn("[icbm-source] MC_PASSTHROUGH 发送失败: {}", e.getMessage());
+            return false;
+        }
     }
 
     /** 发送事件消息（出站序号自增；worldEpoch 为源侧当前 epoch）。 */

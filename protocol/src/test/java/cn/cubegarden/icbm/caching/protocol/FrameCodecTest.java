@@ -108,7 +108,9 @@ class FrameCodecTest {
                         "serverHash", new byte[16], "slave-a", "127.0.0.1:50000", new byte[16], 1_700_000_000_000L),
                 new Messages.LoginVerifyRes(true, "", new Messages.MasterVerifiedIdentity(
                         "master", "key-1", "slave-a", new byte[16], "sess-1", new byte[16],
-                        1_700_000_100_000L, new byte[] {1, 2, 3})),
+                        1_700_000_100_000L, new byte[] {1, 2, 3},
+                        new Messages.ProfileProperty[] {new Messages.ProfileProperty(
+                                "textures", "eyJ0ZXh0dXJlcyI6e30=", "sig")})),
                 new Messages.LoginVerifyRes(false, "验证失败", null),
                 new Messages.SessionClosed(new byte[16], "sess-1", "disconnect")
         };

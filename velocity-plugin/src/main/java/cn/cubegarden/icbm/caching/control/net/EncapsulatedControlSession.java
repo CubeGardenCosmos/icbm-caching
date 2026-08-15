@@ -48,9 +48,13 @@ public final class EncapsulatedControlSession implements ControlSessionLogic.Tra
             session.fail("LOGIN_VERIFY 未服务");
         }
 
-        /** MC_PASSTHROUGH 明文 MC 报文（阶段5 权威会话桥实现）。 */
+        /** MC_PASSTHROUGH 明文 MC 报文（权威会话桥；body = [流序号(8)][长度(4)][报文] 原样透传）。 */
         default void onMcPacket(EncapsulatedControlSession session, long streamSequence, byte[] packet) {
-            LOGGER.warn("[control] MC_PASSTHROUGH 流未服务，丢弃（阶段5 实现）seq={}", streamSequence);
+            LOGGER.warn("[control] MC_PASSTHROUGH 流未服务，丢弃（fail closed）seq={}", streamSequence);
+        }
+
+        /** 连接关闭（含断开/EOF/协议违规）：会话记账清理（SESSION_CLOSED 未送达时防泄漏）。 */
+        default void onSessionClosed(EncapsulatedControlSession session) {
         }
     }
 
@@ -102,6 +106,20 @@ public final class EncapsulatedControlSession implements ControlSessionLogic.Tra
         this.logic.send(type, requestId, body);
     }
 
+    /** 发送 MC_PASSTHROUGH 流（streamId=2）原始 body（无包络；权威会话明文 MC 报文回传）。 */
+    public void sendMcPassthrough(byte[] body) {
+        try {
+            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.MC_PASSTHROUGH, body);
+            synchronized (this.out) {
+                this.out.write(frame);
+                this.out.flush();
+            }
+        } catch (IOException e) {
+            LOGGER.warn("[control] MC_PASSTHROUGH 发送失败: {}", e.getMessage());
+            this.fail("mc passthrough send failed");
+        }
+    }
+
     /** 发送 LOGIN_VERIFY 流（streamId=1）原始 body（无包络；登录验证结果回执）。 */
     public void sendLoginVerify(byte[] body) {
         try {
@@ -149,6 +167,11 @@ public final class EncapsulatedControlSession implements ControlSessionLogic.Tra
         } finally {
             this.logic.onTransportClosed();
             this.close();
+            try {
+                this.listener.onSessionClosed(this);
+            } catch (RuntimeException e) {
+                LOGGER.warn("[control] 会话关闭回调异常 {}: {}", this.uuidHex, e.toString());
+            }
         }
     }
 

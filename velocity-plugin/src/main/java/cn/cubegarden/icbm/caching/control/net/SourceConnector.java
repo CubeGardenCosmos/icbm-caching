@@ -42,6 +42,7 @@ public final class SourceConnector implements AutoCloseable {
     private final Replicator replicator;
     private final EncapsulatedChannelClient client;
     private final BackendSessionAdapter adapter;
+    private volatile cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge bridge;
 
     public SourceConnector(ServiceConfig config, ControlService service,
                            Replicator replicator, PeerRegistry registry) {
@@ -79,6 +80,16 @@ public final class SourceConnector implements AutoCloseable {
 
     public boolean connected() {
         return this.client.isConnected();
+    }
+
+    /** 权威桥注入（装配顺序：SourceConnector 创建后 setBridge；null = 未启用权威桥）。 */
+    public void setBridge(cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge bridge) {
+        this.bridge = bridge;
+    }
+
+    /** 发送 MC_PASSTHROUGH 流到源服（权威桥：slave 明文 MC 报文转发）。 */
+    public boolean sendMcPassthrough(byte[] body) {
+        return this.client.sendMcPassthrough(body);
     }
 
     @Override
@@ -184,6 +195,16 @@ public final class SourceConnector implements AutoCloseable {
                 }
             } catch (Exception e) {
                 LOGGER.error("[control] 处理源服消息失败（fail closed，保持现有状态）: {}", e.toString());
+            }
+        }
+
+        @Override
+        public void onMcPacket(byte[] body) {
+            cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge bridge = SourceConnector.this.bridge;
+            if (bridge != null) {
+                bridge.onBackendPacket(body);
+            } else {
+                LOGGER.warn("[control] 权威桥未装配，丢弃源服下行包（{} 字节）", body.length);
             }
         }
 

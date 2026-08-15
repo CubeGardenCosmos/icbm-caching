@@ -33,6 +33,7 @@ public final class ControlService implements AutoCloseable {
     private final PeerRegistry registry;
     private final int runtimeProtocol;
     private volatile cn.cubegarden.icbm.caching.control.auth.SessionRegistry sessionRegistry;
+    private volatile cn.cubegarden.icbm.caching.control.auth.TicketVault ticketVault;
     private volatile boolean shuttingDown;
 
     public ControlService(SnapshotObjectStore store, EventLog eventLog,
@@ -124,12 +125,21 @@ public final class ControlService implements AutoCloseable {
             return;
         }
         registry.unregister(java.util.HexFormat.of().formatHex(msg.playerUuid()), msg.sessionId());
+        cn.cubegarden.icbm.caching.control.auth.TicketVault vault = this.ticketVault;
+        if (vault != null) {
+            vault.revoke(msg.sessionId());
+        }
         LOGGER.info("[control] 会话关闭注销: session={} reason={}", msg.sessionId(), msg.reason());
     }
 
     /** 装配时注入会话注册表（与 AuthGateway 共享同一实例；无则 SESSION_CLOSED 不注销）。 */
     public void setSessionRegistry(cn.cubegarden.icbm.caching.control.auth.SessionRegistry sessionRegistry) {
         this.sessionRegistry = sessionRegistry;
+    }
+
+    /** 装配时注入票据库（SESSION_CLOSED 吊销票据；无则只注销记账）。 */
+    public void setTicketVault(cn.cubegarden.icbm.caching.control.auth.TicketVault ticketVault) {
+        this.ticketVault = ticketVault;
     }
 
     public void onAdminInvalidate(ControlSession session, Messages.AdminInvalidate msg) {

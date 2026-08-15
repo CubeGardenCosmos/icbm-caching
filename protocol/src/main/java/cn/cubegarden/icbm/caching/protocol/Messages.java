@@ -172,7 +172,8 @@ public final class Messages {
             String sessionId,
             byte[] nonce,
             long expiresAt,
-            byte[] signature
+            byte[] signature,
+            ProfileProperty[] profileProperties
     ) {
     }
 

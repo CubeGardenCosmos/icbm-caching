@@ -49,6 +49,7 @@ public final class TestBackendServer implements AutoCloseable {
     final List<String> events = new CopyOnWriteArrayList<>();
     final CountDownLatch helloAcked = new CountDownLatch(1);
     final CountDownLatch putAckReceived = new CountDownLatch(1);
+    final List<byte[]> receivedMcPackets = new CopyOnWriteArrayList<>();
     final AtomicLong sequence = new AtomicLong();
     volatile boolean accepted;
     volatile boolean connected;
@@ -98,13 +99,19 @@ public final class TestBackendServer implements AutoCloseable {
                         break;
                     }
                 }
-                // 读循环：收 PUT_SNAPSHOT_ACK
+                // 读循环：CONTROL（PUT_SNAPSHOT_ACK）与 MC_PASSTHROUGH（权威桥）
                 while (true) {
-                    Envelope env = this.readControl();
-                    if (env.messageType() == MessageType.PUT_SNAPSHOT_ACK) {
-                        Messages.PutSnapshotAck ack = decode(MessageType.PUT_SNAPSHOT_ACK, env.body());
-                        this.events.add("put_ack:" + ack.result());
-                        this.putAckReceived.countDown();
+                    byte[] frame = readWireFrame(this.in);
+                    EncapsulatedFrame.Decrypted decrypted = EncapsulatedFrame.decodeEncryptedFrame(this.decrypt, frame);
+                    if (decrypted.stream() == StreamId.CONTROL) {
+                        Envelope env = FrameCodec.decodeFrame(decrypted.body());
+                        if (env.messageType() == MessageType.PUT_SNAPSHOT_ACK) {
+                            Messages.PutSnapshotAck ack = decode(MessageType.PUT_SNAPSHOT_ACK, env.body());
+                            this.events.add("put_ack:" + ack.result());
+                            this.putAckReceived.countDown();
+                        }
+                    } else if (decrypted.stream() == StreamId.MC_PASSTHROUGH) {
+                        this.receivedMcPackets.add(decrypted.body());
                     }
                 }
             } catch (Exception e) {
@@ -117,6 +124,14 @@ public final class TestBackendServer implements AutoCloseable {
 
     public int port() {
         return this.server.getLocalPort();
+    }
+
+    void sendMcPassthrough(byte[] body) throws Exception {
+        byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encrypt, StreamId.MC_PASSTHROUGH, body);
+        synchronized (this.out) {
+            this.out.write(frame);
+            this.out.flush();
+        }
     }
 
     void sendHello() throws Exception {

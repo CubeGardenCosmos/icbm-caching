@@ -277,9 +277,12 @@ SESSION_CLOSED=0x13；按 AGENTS.md 约定，新增消息 type 已在同一提�
     verified(1) + reason(2+utf8)
     verified=true 时附 MasterVerifiedIdentity 断言：
       issuer(2+utf8) / keyId(2+utf8) / audience(2+utf8) / playerUuid(16) /
-      sessionId(2+utf8) / nonce(16) / expiresAt(8) / signature(2+bytes)
+      sessionId(2+utf8) / nonce(16) / expiresAt(8) / signature(2+bytes) /
+      profileProperties(count(2) + 每项 name(2+utf8) + value(2+utf8) + signature(2+utf8))
+      （hasJoined 返回的纹理签名属性，随断言传 slave 供 GameProfile 皮肤）
     verified=false 时 reason 为拒绝原因：验证失败 / DUPLICATE_SESSION（已存在于其它 slave）/
-      黑名单 / 吊销
+      REPLAYED_NONCE（票据重放）/ SERVER_NOT_ALLOWED（落点白名单）/ UNVERIFIED_USERNAME /
+      AUTH_SERVERS_UNAVAILABLE / 黑名单 / 吊销
 
 ### SESSION_CLOSED（slave → master）
 
@@ -287,8 +290,24 @@ SESSION_CLOSED=0x13；按 AGENTS.md 约定，新增消息 type 已在同一提�
 
 master 注销记账（防会话表泄漏）；玩家断开、切换落点、后端故障均需上报。
 
-落地状态（里程碑 4）：slave 侧 LoginVerifyGate 在玩家登出时上报 SESSION_CLOSED；master 侧
-SessionRegistry（控制服务内模块）经 ControlService.onSessionClosed 注销。
+落地状态（里程碑 4/5）：slave 侧 LoginVerifyGate 在玩家登出时上报 SESSION_CLOSED；master 侧
+SessionRegistry（控制服务内模块）经 ControlService.onSessionClosed 注销（SESSION_CLOSED 同时
+吊销票据）；slave 连接断开时按 slave 维度批量注销（SESSION_CLOSED 未送达时防会话表泄漏）。
+
+完整验证流程（里程碑 5）：master 是唯一验证者，依次：
+1. 票据单次兑换：LOGIN_VERIFY_REQ.nonce 首次出现才继续；同一 nonce 重放 → REPLAYED_NONCE；
+2. 全局会话记账：playerUuid 已活跃 → DUPLICATE_SESSION（拒新；踢旧为管理操作 kickOld）；
+3. 落点判定：serverName（= slaveId）不在白名单 → SERVER_NOT_ALLOWED；
+4. Mojang 正版验证：复刻 26.3 ServerLoginPacketListenerImpl.handleKey 语义
+   （serverHash = sha1-hex digest，hasJoined URL 带 username/serverId/ip）→ 未验证/服务不可用
+   → 拒绝（fail closed，AUTH_SERVERS_UNAVAILABLE）；offline 开关（control.auth.verifyMojang=false）
+   放行但仍记账（开发/测试惯例，生产必须开启）；
+5. 断言签发：MasterVerifiedIdentity 经 HMAC-SHA256(master assertion key, canonical 字段编码)
+   签名（keyId 轮换支持；断言短过期 expiresAt；profileProperties 随断言），RES(verified=true)。
+
+失败路径回滚记账与票据（保证不泄漏）。断言签名密钥在 master 离线保护；对称 HMAC 在封装
+通道受信面内防重放/完整性，slave 间伪造由通道会话密钥隔离阻断（非对称公钥验证随密钥分发流
+阶段 6/7）。
 
 约束：
 
@@ -296,3 +315,23 @@ SessionRegistry（控制服务内模块）经 ControlService.onSessionClosed 注
 - master 记账与落点判定的竞态（验证通过→玩家真正进入后端之间）需两阶段确认或持有锁，避免双通过。
 - offline 模式（开发/测试）：master 配置开关，verify=false 时直接放行但仍记账（沿用测试服务器惯例）。
 - 重复会话策略（拒新 / 踢旧）与“源服 + 一个缓存后端同时在线”是否允许，由部署策略定案。
+
+## 10. 权威会话桥（里程碑 5 v1；ARCHITECTURE §3.2）
+
+权威会话（玩家需要源服实时权威数据）时，slave 把明文 Minecraft 报文经封装通道
+**MC_PASSTHROUGH 流（streamId=2）** 交给 master，master 以 velocity 授信模式转发到源服
+（backend 封装通道扩展承载 MC_PASSTHROUGH 流）；源服返回的数据包在 master 侧缓存后回传
+slave。
+
+- 方向与承载：slave ↔ master 与 master ↔ 源服均走封装通道 MC_PASSTHROUGH 流，body =
+  `[流序号(8)][长度(4)][明文 MC 报文字节]`，**master 只做字节透传**（不解析 26.3 包结构，
+  不复制常量）；流序号由发起方维护（master 不校验内容）。
+- 桥建立：slave 发起（首个报文）登记为**单一活跃权威会话**（v1；多玩家并发随阶段 6/7
+  虚拟玩家连接）；master 经落点判定授权（源服健康 + 断路器未 OPEN）；源服故障/断路器 OPEN
+  → 拒绝转发，slave 继续缓存会话（后端故障 fallback，fail closed 不猜测）。
+- 数据包缓存（PacketLog）：master 对每条转发报文做字节级审计日志（方向/时间戳/长度/
+  SHA-256，有界内存）；**对象库仍是唯一基线**（committed+epoch 守卫不变）——权威会话期间
+  源服区块数据由源服快照管道（ChunkSnapshotTicker）经既有 PUT_SNAPSHOT 进对象库，"源服
+  返回数据包形成快照"的落点。字节日志不参与基线判定。
+- 源服侧：BackendControlSession 新增 MC_PASSTHROUGH 流回调（默认丢弃，fail closed）；
+  虚拟玩家连接（把报文注入真实 Minecraft 连接）随阶段 6/7 端到端实现。

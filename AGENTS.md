@@ -67,7 +67,8 @@
   - `virtual-backend/`：阶段3 已实现的独立 26.3 旁观会话后端（包 `cn.cubegarden.icbm.caching.virtual`）；
       修正后作为 slave-mod 的技术基础（只读变体参考；Nbt/对象库/ServeGate 逻辑迁移入 slave-mod）。
   - `control-service/`：已并入 master（包 `cn.cubegarden.icbm.caching.control` 位于 `velocity-plugin/`；对象库/事件日志/订阅逻辑为 master 内部模块，无独立监听端口；封装通道服务由 master 提供）。
-  - `auth-gateway/`：Mojang 正版验证组件（归 master 受信面：master 内实现验证 + 全局会话记账）。
+  - `auth-gateway/`：Mojang 正版验证组件（归 master 受信面：master 内实现验证 + 全局会话记账 +
+      断言签名 + 票据单次兑换 + 落点判定 + 权威会话桥（McPassthroughBridge/PacketLog））。
   - `protocol/`：跨组件共享控制协议（包 `cn.cubegarden.icbm.caching.protocol`，纯 Java 25，netty/slf4j 由消费方提供；含包络/消息编解码、SnapshotObjectStore、ControlChannel 客户端基类）。
   - `docs/`：设计与协议文档；`build/`：Python 开发环境工具。
   - 跨组件共享的控制协议消息类型放 `cn.cubegarden.icbm.caching.protocol`（单侧实现，两侧复用，不得另写副本）。

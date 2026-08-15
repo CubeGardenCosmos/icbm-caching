@@ -187,7 +187,8 @@ class SlaveControlClientTest {
             byte[] res = encode(MessageType.LOGIN_VERIFY_RES, new Messages.LoginVerifyRes(
                     true, "", new Messages.MasterVerifiedIdentity(
                             "master", "key-1", "lobby-1", new byte[16], "sess-1",
-                            new byte[16], System.currentTimeMillis() + 60_000, new byte[0])));
+                            new byte[16], System.currentTimeMillis() + 60_000, new byte[0],
+                            new Messages.ProfileProperty[0])));
             byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encrypt, StreamId.LOGIN_VERIFY, res);
             this.out.write(frame);
             this.out.flush();

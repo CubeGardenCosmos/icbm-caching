@@ -19,9 +19,11 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
   模组监听 backend 端口（`icbm.backend.*`，PSK = forwarding secret），master 主动连接（无玩家
   在线也可用），方向与 slave 封装通道相反（源服发 HELLO，master 验证）。
 - **master（`velocity-plugin/`，含已并入的 `cn.cubegarden.icbm.caching.control` 包）**：唯一信任根与
-  决策中心；Auth Gateway（Mojang 正版验证与签名随里程碑 5，最小版已记账）、全局会话记账
-  （防同一玩家加入多个 slave，重复会话拒新）、单端口封装通道、required/committed revision 快照
-  聚合。独立进程形态入口 `ControlServiceMain`（Velocity 插件入口于阶段 5 接线）。
+  决策中心；Auth Gateway（Mojang 正版验证 + 断言签名 + 票据单次兑换 + 吊销）、全局会话记账
+  （防同一玩家加入多个 slave，重复会话拒新/踢旧/断开自动注销）、落点判定（白名单/fallback）+
+  健康检查/断路器、权威会话桥（slave↔master↔源服 MC_PASSTHROUGH 字节透传 + 数据包缓存）、
+  单端口封装通道、required/committed revision 快照聚合。独立进程形态入口 `ControlServiceMain`
+  （Velocity 插件入口于阶段 6/7 端到端装配）。
 - **slave（`slave-mod/`）**：原生 MC 服务器进程上的 Fabric 模组（只做协议与预测，不做世界计算）；
   对象库命中注入 FULL 快照区块（SerializableChunkData 解析），未命中/落后/epoch 不匹配 fail closed
   （EMPTY 不生成 + 玩家移动边界拦截）；旁观（互动拒绝）；禁持久化；SLAVE 角色封装通道客户端

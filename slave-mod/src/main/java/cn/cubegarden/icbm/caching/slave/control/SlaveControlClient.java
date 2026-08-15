@@ -127,6 +127,14 @@ public final class SlaveControlClient implements AutoCloseable {
     }
 
     /** 玩家登出上报：SESSION_CLOSED（CONTROL 流；master 注销记账）。 */
+    /**
+     * 权威会话：递交明文 MC 报文（MC_PASSTHROUGH 流，字节透传；CACHE_PROTOCOL §1.1）。
+     * 玩家报文捕获/注入随阶段 6/7 端到端（本方法为协议能力，供桥接层调用）。
+     */
+    public boolean sendMcPassthrough(byte[] body) {
+        return this.channel.sendMcPassthrough(body);
+    }
+
     public boolean sendSessionClosed(byte[] playerUuid, String sessionId, String reason) {
         return this.channel.send(MessageType.SESSION_CLOSED, this.requestIds.incrementAndGet(), 0L,
                 EncapsulatedChannelClient.encode(MessageType.SESSION_CLOSED,

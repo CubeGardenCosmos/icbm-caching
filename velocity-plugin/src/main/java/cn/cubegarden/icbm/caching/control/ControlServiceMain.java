@@ -47,14 +47,42 @@ public final class ControlServiceMain {
         cn.cubegarden.icbm.caching.control.auth.SessionRegistry sessionRegistry =
                 new cn.cubegarden.icbm.caching.control.auth.SessionRegistry();
         service.setSessionRegistry(sessionRegistry);
+
+        // Auth Gateway 完整装配（里程碑 5）：票据单次兑换 + Mojang 验证 + 断言签名 + 落点判定
+        cn.cubegarden.icbm.caching.control.auth.TicketVault ticketVault =
+                new cn.cubegarden.icbm.caching.control.auth.TicketVault();
+        service.setTicketVault(ticketVault);
+        cn.cubegarden.icbm.caching.control.auth.MojangSessionVerifier verifier =
+                new cn.cubegarden.icbm.caching.control.auth.MojangSessionVerifier(
+                        config.auth().verifyMojang(), config.auth().mojangTimeoutMillis());
+        byte[] assertionKey = config.auth().assertionKey().isEmpty()
+                ? randomKey() : config.auth().assertionKey().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        cn.cubegarden.icbm.caching.control.auth.IdentitySigner signer =
+                cn.cubegarden.icbm.caching.control.auth.IdentitySigner.fromKey(assertionKey);
+        cn.cubegarden.icbm.caching.control.routing.BackendHealth backendHealth =
+                new cn.cubegarden.icbm.caching.control.routing.BackendHealth();
+        cn.cubegarden.icbm.caching.control.routing.CircuitBreaker circuitBreaker =
+                new cn.cubegarden.icbm.caching.control.routing.CircuitBreaker(3, 30_000);
+        cn.cubegarden.icbm.caching.control.routing.RoutingPolicy routing = new cn.cubegarden.icbm.caching.control.routing.RoutingPolicy(
+                config.allowedServerNames(), backendHealth, circuitBreaker,
+                config.heartbeatIntervalMillis() * 3);
+        cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener authGateway =
+                new cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener(
+                        sessionRegistry, ticketVault, verifier, signer, routing,
+                        config.serverId(), 60_000);
+        cn.cubegarden.icbm.caching.control.bridge.PacketLog packetLog =
+                new cn.cubegarden.icbm.caching.control.bridge.PacketLog(4096);
+        cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge bridge =
+                new cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge(routing, circuitBreaker, packetLog);
         EncapsulatedControlServer encapsulated = new EncapsulatedControlServer(config, service, replicator,
-                registry, new cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener(sessionRegistry));
+                registry, new cn.cubegarden.icbm.caching.control.bridge.CompositeSessionListener(authGateway, bridge));
         encapsulated.start();
 
         SourceConnector sourceConnector = null;
         if (config.backend() != null) {
             sourceConnector = new SourceConnector(config, service, replicator, registry);
             sourceConnector.start();
+            bridge.attachSourceConnector(sourceConnector);
         }
         SourceConnector sourceRef = sourceConnector;
 
@@ -68,6 +96,12 @@ public final class ControlServiceMain {
                 config.storeRoot(), config.eventLogPath(), config.host(), encapsulated.port(),
                 config.psk().length(), config.roleBindings().keySet(),
                 config.backend() == null ? "未启用" : config.backend().host() + ":" + config.backend().port());
+    }
+
+    private static byte[] randomKey() {
+        byte[] key = new byte[32];
+        new java.security.SecureRandom().nextBytes(key);
+        return key;
     }
 
     private static ServiceConfig loadConfig(Path path) throws Exception {

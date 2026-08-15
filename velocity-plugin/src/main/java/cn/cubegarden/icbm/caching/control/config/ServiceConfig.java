@@ -2,6 +2,8 @@ package cn.cubegarden.icbm.caching.control.config;
 
 import cn.cubegarden.icbm.caching.protocol.Role;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -30,11 +32,36 @@ public record ServiceConfig(
         int pushWindow,
         long heartbeatIntervalMillis,
         long lagThresholdMillis,
-        int runtimeProtocol
+        int runtimeProtocol,
+        AuthConfig auth,                  // Auth Gateway（Mojang 验证/断言签名）
+        List<String> allowedServerNames   // 落点白名单（空 = 全部允许）
 ) {
 
     /** 源服 backend 连接（master 主动连接；PSK = velocity forwarding secret）。 */
     public record BackendServer(String host, int port, String forwardingSecret) {
+    }
+
+    /**
+     * Auth Gateway 配置（HIERARCHY §2 / CACHE_PROTOCOL §9）。
+     *
+     * <p>verifyMojang：调用 Mojang session server 的 hasJoined 完成正版验证；false = offline
+     * 放行但仍记账（开发/测试惯例，生产必须 true，运维手册约束）。mojangTimeoutMillis：
+     * hasJoined HTTP 超时（超时/不可用 → AuthenticationUnavailable 语义，fail closed 拒绝）。
+     * assertionKey：身份断言 HMAC 签名密钥（离线保护；重启后旧断言自然失效，断言短期有效）。
+     */
+    public record AuthConfig(boolean verifyMojang, long mojangTimeoutMillis, String assertionKey) {
+    }
+
+    /** 15 参数便捷构造（测试/默认装配）：auth = offline 默认 + 空白名单。 */
+    public ServiceConfig(String host, Path storeRoot, Path eventLogPath, int maxEventLogEntries,
+                         String serverId, String serverName, String psk, int encapsulatedPort,
+                         Map<String, String> roleBindings, BackendServer backend,
+                         int maxFrameBytes, int pushWindow,
+                         long heartbeatIntervalMillis, long lagThresholdMillis, int runtimeProtocol) {
+        this(host, storeRoot, eventLogPath, maxEventLogEntries, serverId, serverName, psk,
+                encapsulatedPort, roleBindings, backend, maxFrameBytes, pushWindow,
+                heartbeatIntervalMillis, lagThresholdMillis, runtimeProtocol,
+                new AuthConfig(false, 10_000, ""), List.of());
     }
 
     public static ServiceConfig defaults(Path root) {
@@ -44,7 +71,8 @@ public record ServiceConfig(
                 "master-1", "default", "", 0,
                 new LinkedHashMap<>(), null, 16 * 1024 * 1024,
                 64, 30_000, 90_000,
-                1_073_742_154 // 26.3-snapshot-8 runtime protocol（docs/VERSION_FREEZE.md）
+                1_073_742_154, // 26.3-snapshot-8 runtime protocol（docs/VERSION_FREEZE.md）
+                new AuthConfig(false, 10_000, ""), List.of()
         );
     }
 
@@ -93,7 +121,15 @@ public record ServiceConfig(
                 Integer.parseInt(props.getProperty("control.pushWindow", Integer.toString(d.pushWindow()))),
                 Long.parseLong(props.getProperty("control.heartbeatIntervalMillis", Long.toString(d.heartbeatIntervalMillis()))),
                 Long.parseLong(props.getProperty("control.lagThresholdMillis", Long.toString(d.lagThresholdMillis()))),
-                Integer.parseInt(props.getProperty("control.runtimeProtocol", Integer.toString(d.runtimeProtocol())))
+                Integer.parseInt(props.getProperty("control.runtimeProtocol", Integer.toString(d.runtimeProtocol()))),
+                new AuthConfig(
+                        Boolean.parseBoolean(props.getProperty("control.auth.verifyMojang",
+                                Boolean.toString(d.auth().verifyMojang()))),
+                        Long.parseLong(props.getProperty("control.auth.mojangTimeoutMillis",
+                                Long.toString(d.auth().mojangTimeoutMillis()))),
+                        props.getProperty("control.auth.assertionKey", d.auth().assertionKey())),
+                Arrays.stream(props.getProperty("control.allowedServerNames", "").split(","))
+                        .map(String::trim).filter(s -> !s.isEmpty()).toList()
         );
     }
 
