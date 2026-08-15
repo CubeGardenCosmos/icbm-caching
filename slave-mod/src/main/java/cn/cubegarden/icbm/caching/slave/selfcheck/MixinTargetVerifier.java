@@ -22,9 +22,18 @@ public final class MixinTargetVerifier {
     public static boolean verify() {
         boolean ok = checkMethod("net.minecraft.server.level.ChunkMap", "scheduleChunkLoad")
                 && checkMethod("net.minecraft.server.level.ChunkMap", "applyStep")
+                && checkMethod("net.minecraft.server.level.ChunkMap", "saveAllChunks")
+                && checkMethod("net.minecraft.server.level.ChunkMap", "saveChunksEagerly")
                 && checkClass("net.minecraft.world.level.chunk.storage.SerializableChunkData")
+                && checkMethod("net.minecraft.server.network.ServerLoginPacketListenerImpl", "handleHello")
                 && checkMethod("net.minecraft.server.network.ServerLoginPacketListenerImpl", "handleKey")
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleMovePlayer")
+                // 阶段 8.1 互动闸门（SpectateGateMixin）目标
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handlePlayerAction")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleUseItemOn")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleUseItem")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleInteract")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "ackBlockChangesUpTo")
                 && checkMethod("net.minecraft.server.MinecraftServer", "getServerModName");
         long maxMemory = Runtime.getRuntime().maxMemory();
         if (maxMemory > 256L * 1024 * 1024) {

@@ -13,6 +13,7 @@ import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -34,11 +35,6 @@ public abstract class SpectateGateMixin {
     @Shadow
     @Final
     private ServerPlayer player;
-
-    @Shadow
-    public void send(Packet<?> packet) {
-        throw new AssertionError("shadow");
-    }
 
     @Inject(method = "handleUseItemOn", at = @At("HEAD"), cancellable = true)
     private void icbm_slave$routeUseItemOn(ServerboundUseItemOnPacket packet, CallbackInfo ci) {
@@ -82,7 +78,7 @@ public abstract class SpectateGateMixin {
                             packet.getPos(), packet.getSequence());
             case ABORT_DESTROY_BLOCK, STOP_DESTROY_BLOCK -> {
                 // v1 无挖掘进度：回显当前状态 + ack（客户端撤销其挖掘预测，fail closed）
-                this.send(new ClientboundBlockUpdatePacket(this.player.level(), packet.getPos()));
+                this.icbm_slave$send(new ClientboundBlockUpdatePacket(this.player.level(), packet.getPos()));
                 this.ackBlockChangesUpTo(packet.getSequence());
             }
             default -> {
@@ -95,6 +91,13 @@ public abstract class SpectateGateMixin {
     @Shadow
     public void ackBlockChangesUpTo(int sequence) {
         throw new AssertionError("shadow");
+    }
+
+    /** 发送包（send 声明在父类 ServerCommonPacketListenerImpl，@Shadow 不解析继承成员——
+     *  26.3 ServerCommonPacketListenerImpl.java:156；cast 调用替代，运行时类型即 target 类）。 */
+    @Unique
+    private void icbm_slave$send(Packet<?> packet) {
+        ((ServerGamePacketListenerImpl) (Object) this).send(packet);
     }
 
     private void icbm_slave$deny(CallbackInfo ci) {
