@@ -32,6 +32,7 @@ public final class ControlService implements AutoCloseable {
     private final Replicator replicator;
     private final PeerRegistry registry;
     private final int runtimeProtocol;
+    private volatile cn.cubegarden.icbm.caching.control.auth.SessionRegistry sessionRegistry;
     private volatile boolean shuttingDown;
 
     public ControlService(SnapshotObjectStore store, EventLog eventLog,
@@ -47,7 +48,7 @@ public final class ControlService implements AutoCloseable {
         session.requireRole(Role.SOURCE);
         this.store.announceEpoch(msg.dimension(), msg.worldEpoch());
         long seq = this.eventLog.append(EventLog.EventType.WORLD_EPOCH, msg.dimension(), null,
-                msg.worldEpoch(), "", msg.registryAndDatapackFingerprint());
+                msg.worldEpoch(), "", msg.registryAndDatapackFingerprint(), msg.spawn());
         this.replicator.onWorldEpoch(msg, seq);
         LOGGER.info("[control] WORLD_EPOCH: dim={} epoch={} reason={}", msg.dimension(), msg.worldEpoch(), msg.reason());
     }
@@ -57,7 +58,7 @@ public final class ControlService implements AutoCloseable {
         ChunkRef key = ChunkRef.of(msg.dimension(), msg.chunkX(), msg.chunkZ());
         this.store.raiseRequired(key, msg.revision());
         long seq = this.eventLog.append(EventLog.EventType.INVALIDATE, msg.dimension(), key,
-                msg.revision(), "", "");
+                msg.revision(), "", "", Messages.SpawnPoint.DEFAULT);
         this.replicator.onInvalidate(msg, seq);
     }
 
@@ -77,7 +78,7 @@ public final class ControlService implements AutoCloseable {
                 return PutResult.REJECTED_UNAVAILABLE;
             }
             long seq = this.eventLog.append(EventLog.EventType.SNAPSHOT_COMMITTED, msg.dimension(), key,
-                    msg.revision(), msg.payloadHash(), "");
+                    msg.revision(), msg.payloadHash(), "", Messages.SpawnPoint.DEFAULT);
             this.replicator.onCommitted(key, msg.revision(), msg.payloadHash(), seq);
         }
         return result;
@@ -114,6 +115,23 @@ public final class ControlService implements AutoCloseable {
     }
 
     /** ADMIN_INVALIDATE：chunk/region/dimension/world 范围失效（审计原因记录到日志）。 */
+    /** SESSION_CLOSED：slave 上报会话关闭 → 注销全局记账（防会话表泄漏）。 */
+    public void onSessionClosed(ControlSession session, Messages.SessionClosed msg) {
+        session.requireRole(Role.SLAVE);
+        cn.cubegarden.icbm.caching.control.auth.SessionRegistry registry = this.sessionRegistry;
+        if (registry == null) {
+            LOGGER.debug("[control] SESSION_CLOSED 忽略（无会话注册表）: {}", msg.sessionId());
+            return;
+        }
+        registry.unregister(java.util.HexFormat.of().formatHex(msg.playerUuid()), msg.sessionId());
+        LOGGER.info("[control] 会话关闭注销: session={} reason={}", msg.sessionId(), msg.reason());
+    }
+
+    /** 装配时注入会话注册表（与 AuthGateway 共享同一实例；无则 SESSION_CLOSED 不注销）。 */
+    public void setSessionRegistry(cn.cubegarden.icbm.caching.control.auth.SessionRegistry sessionRegistry) {
+        this.sessionRegistry = sessionRegistry;
+    }
+
     public void onAdminInvalidate(ControlSession session, Messages.AdminInvalidate msg) {
         session.requireRole(Role.SOURCE);
         switch (msg.scope()) {
@@ -198,7 +216,7 @@ public final class ControlService implements AutoCloseable {
         long next = current == null ? 1 : current.required() + 1;
         this.store.raiseRequired(key, next);
         long seq = this.eventLog.append(EventLog.EventType.INVALIDATE, key.dimension(), key,
-                next, "", "");
+                next, "", "", Messages.SpawnPoint.DEFAULT);
         this.replicator.onInvalidate(new Messages.Invalidate(key.dimension(), key.x(), key.z(),
                 next, cn.cubegarden.icbm.caching.protocol.InvalidateReason.ADMIN), seq);
     }

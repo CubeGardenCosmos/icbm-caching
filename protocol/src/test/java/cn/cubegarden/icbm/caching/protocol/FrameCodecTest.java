@@ -88,7 +88,8 @@ class FrameCodecTest {
         Object[] samples = new Object[] {
                 new Messages.Hello(Role.SLAVE, "slave-a", "26.3", 1073742154, "0.19.3", "0.157.1+26.3", "m", "r", (byte) 1),
                 new Messages.HelloAck(true, "", "master-1"),
-                new Messages.WorldEpoch(dim, 3, EpochReason.ROLLBACK, "reg"),
+                new Messages.WorldEpoch(dim, 3, EpochReason.ROLLBACK, "reg",
+                        new Messages.SpawnPoint(0.5, 64.0, -1.25, 90.0F, 0.0F)),
                 new Messages.Invalidate(dim, 3, -1, 7, InvalidateReason.BLOCK_STATE),
                 new Messages.PutSnapshot(dim, 3, -1, 7, "NBT_CHUNK_V1", "GZIP", 3, "abc", payload),
                 new Messages.PutSnapshotAck(dim, 3, -1, 7, PutResult.OK),

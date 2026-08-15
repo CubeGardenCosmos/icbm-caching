@@ -2,6 +2,7 @@ package cn.cubegarden.icbm.caching.source.snapshot;
 
 import cn.cubegarden.icbm.caching.protocol.ChunkRef;
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
+import cn.cubegarden.icbm.caching.protocol.Messages;
 import cn.cubegarden.icbm.caching.protocol.store.SnapshotObjectStore;
 import cn.cubegarden.icbm.caching.source.revision.ChunkKey;
 import java.io.IOException;
@@ -63,7 +64,8 @@ public final class LocalSnapshotSink implements SnapshotSink {
     }
 
     @Override
-    public void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint) {
+    public void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint,
+                              Messages.SpawnPoint spawn) {
         this.store.announceEpoch(dimension, epoch);
     }
 

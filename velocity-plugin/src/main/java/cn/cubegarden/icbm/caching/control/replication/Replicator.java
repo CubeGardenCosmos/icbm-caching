@@ -101,18 +101,19 @@ public final class Replicator {
 
     public void onWorldEpoch(Messages.WorldEpoch msg, long seq) {
         this.broadcast(new EventLog.Event(seq, EventLog.EventType.WORLD_EPOCH, msg.dimension(), null,
-                msg.worldEpoch(), "", msg.registryAndDatapackFingerprint()));
+                msg.worldEpoch(), "", msg.registryAndDatapackFingerprint(), msg.spawn()));
     }
 
     public void onInvalidate(Messages.Invalidate msg, long seq) {
         this.broadcast(new EventLog.Event(seq, EventLog.EventType.INVALIDATE, msg.dimension(),
-                ChunkRef.of(msg.dimension(), msg.chunkX(), msg.chunkZ()), msg.revision(), "", ""));
+                ChunkRef.of(msg.dimension(), msg.chunkX(), msg.chunkZ()), msg.revision(), "", "",
+                Messages.SpawnPoint.DEFAULT));
     }
 
     /** PUT_SNAPSHOT 提交后：向订阅 slave 推送已提交对象（窗口流控）。 */
     public void onCommitted(ChunkRef key, long revision, String payloadHash, long seq) {
         this.broadcast(new EventLog.Event(seq, EventLog.EventType.SNAPSHOT_COMMITTED, key.dimension(),
-                key, revision, payloadHash, ""));
+                key, revision, payloadHash, "", Messages.SpawnPoint.DEFAULT));
     }
 
     /** 周期心跳：空闲连接保活 + 滞后检测（超过 lagThreshold 未收到 ACK → LAGGING）。 */
@@ -179,7 +180,7 @@ public final class Replicator {
             case WORLD_EPOCH -> {
                 type = MessageType.WORLD_EPOCH;
                 body = new Messages.WorldEpoch(event.dimension(), event.revision(),
-                        EpochReason.ADMIN, event.fingerprint());
+                        EpochReason.ADMIN, event.fingerprint(), event.spawn());
             }
             case INVALIDATE -> {
                 type = MessageType.INVALIDATE;

@@ -84,6 +84,7 @@ public final class MessageBodyCodec {
                 out.writeLong(value.worldEpoch());
                 out.writeByte(value.reason().id());
                 writeString(out, value.registryAndDatapackFingerprint());
+                writeSpawn(out, value.spawn());
             }
 
             @Override
@@ -94,7 +95,7 @@ public final class MessageBodyCodec {
                 if (reason == null) {
                     throw new IOException("unknown epoch reason");
                 }
-                return new Messages.WorldEpoch(dimension, epoch, reason, readString(in));
+                return new Messages.WorldEpoch(dimension, epoch, reason, readString(in), readSpawn(in));
             }
         });
         register(MessageType.INVALIDATE, new Codec<Messages.Invalidate>() {
@@ -478,6 +479,20 @@ public final class MessageBodyCodec {
         byte[] bytes = new byte[length];
         in.readFully(bytes);
         return ProtocolConstants.utf8(bytes);
+    }
+
+    /** 维度出生点（WorldEpoch 字段；x/y/z double + yaw/pitch float，与 26.3 RespawnData 数值精度一致）。 */
+    static void writeSpawn(DataOutput out, Messages.SpawnPoint spawn) throws IOException {
+        out.writeDouble(spawn.x());
+        out.writeDouble(spawn.y());
+        out.writeDouble(spawn.z());
+        out.writeFloat(spawn.yaw());
+        out.writeFloat(spawn.pitch());
+    }
+
+    static Messages.SpawnPoint readSpawn(DataInput in) throws IOException {
+        return new Messages.SpawnPoint(in.readDouble(), in.readDouble(), in.readDouble(),
+                in.readFloat(), in.readFloat());
     }
 
     /** 16 字节定长 UUID 二进制（与 Java UUID 的字节序约定一致，两字节序均为定长 16 字节）。 */

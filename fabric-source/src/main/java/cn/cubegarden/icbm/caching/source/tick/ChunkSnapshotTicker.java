@@ -1,6 +1,7 @@
 package cn.cubegarden.icbm.caching.source.tick;
 
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
+import cn.cubegarden.icbm.caching.protocol.Messages;
 import cn.cubegarden.icbm.caching.source.CacheGate;
 import cn.cubegarden.icbm.caching.source.dirty.DirtyTracker;
 import cn.cubegarden.icbm.caching.source.revision.ChunkKey;
@@ -28,6 +29,7 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.chunk.storage.SerializableChunkData;
+import net.minecraft.world.level.storage.LevelData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,6 +54,7 @@ public final class ChunkSnapshotTicker {
     private final CacheGate gate;
     private final String registryAndDatapackFingerprint;
     private final Map<Identifier, Long> announcedEpochs = new HashMap<>();
+    private volatile MinecraftServer lastServer;
 
     public ChunkSnapshotTicker(
             SourceStateService service,
@@ -68,6 +71,7 @@ public final class ChunkSnapshotTicker {
     }
 
     public void onEndServerTick(MinecraftServer server) {
+        this.lastServer = server;
         if (!this.gate.isEnabled()) {
             return;
         }
@@ -131,8 +135,22 @@ public final class ChunkSnapshotTicker {
         String reason = transition == null ? "START" : transition.reason().name();
         this.publisher.sink().announceEpoch(
                 new DimensionRef(dimension.getNamespace(), dimension.getPath()),
-                epoch, reason, this.registryAndDatapackFingerprint);
+                epoch, reason, this.registryAndDatapackFingerprint, this.lastSpawn());
         this.announcedEpochs.put(dimension, epoch);
+    }
+
+    /** 最近一次发布的维度出生点（26.3 ServerLevel.getRespawnData → LevelData.RespawnData）。 */
+    private Messages.SpawnPoint lastSpawn() {
+        MinecraftServer server = this.lastServer;
+        if (server == null) {
+            return Messages.SpawnPoint.DEFAULT;
+        }
+        LevelData.RespawnData respawn = server.getRespawnData();        if (respawn == null || respawn.globalPos() == null || respawn.globalPos().pos() == null) {
+            return Messages.SpawnPoint.DEFAULT;
+        }
+        net.minecraft.core.BlockPos pos = respawn.globalPos().pos();
+        return new Messages.SpawnPoint(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5,
+                respawn.yaw(), respawn.pitch());
     }
 
     private static ChunkSnapshot serialize(ChunkKey key, long revision, long epoch, SerializableChunkData data) {

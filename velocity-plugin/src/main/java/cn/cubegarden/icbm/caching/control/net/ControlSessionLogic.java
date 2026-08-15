@@ -213,6 +213,7 @@ public final class ControlSessionLogic implements ControlSession {
                 this.service.onResync(this, req);
             }
             case ADMIN_INVALIDATE -> this.service.onAdminInvalidate(this, decodeBody(type, envelope.body()));
+            case SESSION_CLOSED -> this.service.onSessionClosed(this, decodeBody(type, envelope.body()));
             case RESYNC_RES, PUT_SNAPSHOT_ACK, HELLO, HELLO_ACK, SNAPSHOT_PUSH, ERROR -> {
                 throw new ProtocolViolation("对端发送了不应由客户端发送的类型: " + type);
             }

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..infra import paths, shell
 
-_ALL = ("protocol", "velocity-plugin", "virtual-backend", "fabric-source")
+_ALL = ("protocol", "velocity-plugin", "virtual-backend", "fabric-source", "slave-mod")
 
 
 def _gradlew(component: str) -> str:

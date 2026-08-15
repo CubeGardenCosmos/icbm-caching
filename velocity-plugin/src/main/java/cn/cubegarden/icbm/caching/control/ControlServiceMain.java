@@ -44,9 +44,11 @@ public final class ControlServiceMain {
         PeerRegistry registry = new PeerRegistry(config.roleBindings());
         Replicator replicator = new Replicator(store, eventLog, config);
         ControlService service = new ControlService(store, eventLog, replicator, registry, config);
+        cn.cubegarden.icbm.caching.control.auth.SessionRegistry sessionRegistry =
+                new cn.cubegarden.icbm.caching.control.auth.SessionRegistry();
+        service.setSessionRegistry(sessionRegistry);
         EncapsulatedControlServer encapsulated = new EncapsulatedControlServer(config, service, replicator,
-                registry, new EncapsulatedControlSession.Listener() {
-                });
+                registry, new cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener(sessionRegistry));
         encapsulated.start();
 
         SourceConnector sourceConnector = null;

@@ -59,8 +59,9 @@
 - 组件目录归属是架构约束，不是建议，第一方组件使用 `icbm-` 前缀；Java 包统一以 `cn.cubegarden.icbm.caching` 为根（与仓库/项目身份一致），按组件分子包：
   - `fabric-source/`：源服 backend Fabric 模组（Java；包 `cn.cubegarden.icbm.caching.source`，模组 ID `icbm_source`；
       管理源服务器并产生消息事件：脏标记、快照、revision、主线程裁决；连接层用 velocity 授信模式）。
-  - `slave-mod/`：slave Fabric 模组后端（阶段1 修正新增，原生 MC 服务器进程上接管游戏事件，只实现协议与部分预测，
-      不做世界计算；256M JVM / 磁盘缓存约束；封装通道客户端）。
+  - `slave-mod/`：slave Fabric 模组后端（原生 MC 服务器进程上接管游戏事件，只实现协议与部分预测，
+      不做世界计算；256M JVM / 磁盘缓存约束；封装通道客户端；区块注入 scheduleChunkLoad/applyStep、
+      移动边界、旁观互动拒绝、禁持久化、LOGIN_VERIFY 递交）。
   - `velocity-plugin/`：master 统筹中心 Velocity 插件（包 `cn.cubegarden.icbm.caching.velocity`；单端口封装通道服务、
       落点判定/切换、会话记账联动、健康检查）。
   - `virtual-backend/`：阶段3 已实现的独立 26.3 旁观会话后端（包 `cn.cubegarden.icbm.caching.virtual`）；

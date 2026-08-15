@@ -101,7 +101,7 @@ class SlaveReplicationClientTest {
                     writeFrame(out, Envelope.of(MessageType.WORLD_EPOCH, 0, "master-1", 1, 1,
                             System.currentTimeMillis(), ControlChannel.encode(MessageType.WORLD_EPOCH,
                             new Messages.WorldEpoch(DIM, 1, cn.cubegarden.icbm.caching.protocol.EpochReason.START,
-                                    "registry-hash"))));
+                                    "registry-hash", Messages.SpawnPoint.DEFAULT))));
                     writeFrame(out, Envelope.of(MessageType.INVALIDATE, 0, "master-1", 1, 2,
                             System.currentTimeMillis(), ControlChannel.encode(MessageType.INVALIDATE,
                             new Messages.Invalidate(DIM, 1, 2, 5,
@@ -168,7 +168,7 @@ class SlaveReplicationClientTest {
                     writeFrame(out, Envelope.of(MessageType.WORLD_EPOCH, 0, "master-1", 1, 1,
                             System.currentTimeMillis(), ControlChannel.encode(MessageType.WORLD_EPOCH,
                             new Messages.WorldEpoch(DIM, 1, cn.cubegarden.icbm.caching.protocol.EpochReason.START,
-                                    "registry-hash"))));
+                                    "registry-hash", Messages.SpawnPoint.DEFAULT))));
                     writeFrame(out, Envelope.of(MessageType.INVALIDATE, 0, "master-1", 1, 2,
                             System.currentTimeMillis(), ControlChannel.encode(MessageType.INVALIDATE,
                             new Messages.Invalidate(DIM, 1, 2, 5,

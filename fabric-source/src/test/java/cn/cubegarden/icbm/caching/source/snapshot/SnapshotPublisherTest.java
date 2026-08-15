@@ -46,7 +46,8 @@ class SnapshotPublisherTest {
 
         @Override
         public void announceEpoch(cn.cubegarden.icbm.caching.protocol.DimensionRef dimension,
-                                  long epoch, String reason, String registryFingerprint) {
+                                  long epoch, String reason, String registryFingerprint,
+                                  cn.cubegarden.icbm.caching.protocol.Messages.SpawnPoint spawn) {
             this.calls.add("epoch:" + epoch);
         }
 

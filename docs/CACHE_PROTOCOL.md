@@ -104,8 +104,11 @@ committed≥required + epoch 匹配），否则不展示旧区块（fail closed�
     worldEpoch
     activationReason: START | ROLLBACK | MODPACK_CHANGE | ADMIN
     registryAndDatapackFingerprint
+    spawnX / spawnY / spawnZ / spawnYaw / spawnPitch（源服 RespawnData 快照，26.3
+      LevelData.RespawnData(GlobalPos, yaw, pitch)；slave join 时放置玩家的基准）
 
 新 epoch 立即使对应维度的旧对象不可读（对象可读 ⇔ 对象 epoch == 维度当前 epoch）。
+spawn 随事件日志原样重放（断线重连补发后 slave 仍可拿到出生点）。
 
 ### INVALIDATE
 
@@ -283,6 +286,9 @@ SESSION_CLOSED=0x13；按 AGENTS.md 约定，新增消息 type 已在同一提�
     playerUuid(16) / sessionId(2+utf8) / reason(2+utf8)
 
 master 注销记账（防会话表泄漏）；玩家断开、切换落点、后端故障均需上报。
+
+落地状态（里程碑 4）：slave 侧 LoginVerifyGate 在玩家登出时上报 SESSION_CLOSED；master 侧
+SessionRegistry（控制服务内模块）经 ControlService.onSessionClosed 注销。
 
 约束：
 

@@ -36,18 +36,21 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
       内网，master 主动连接源服 backend 端口；BackendControlServer/SourceConnector 两侧实现）；
       serverName 注册（HELLO 携带，对象库分域）；数据包缓存基线规则随里程碑 5 权威桥；
       事件集合不变（WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/操作终态）。
-- [ ] slave Fabric 模组（新组件 slave-mod/）：原生 MC 服务器进程上接管游戏事件，只实现协议与部分
-      预测，不做世界计算；256M JVM 与磁盘缓存约束落地；封装通道客户端（公共密码+UUID）。
-- [ ] Auth Gateway 归 master：slave 终止登录握手后递验证材料，master 唯一验证 + 记账
-      （防同一玩家加入多个 slave），签发 MasterVerifiedIdentity；
-      LOGIN_VERIFY 系列消息定义已落地（CACHE_PROTOCOL §9），验证流程实现随阶段3/5。
+- [x] slave Fabric 模组（新组件 slave-mod/）：原生 MC 服务器进程上接管游戏事件，只实现协议与部分
+      预测，不做世界计算（不 worldgen/tick 模拟/持久化写回）；256M JVM 与磁盘缓存约束落地
+      （SnapshotObjectStore 磁盘 + 注入即释放 + 自检）；封装通道客户端（公共密码+UUID，SLAVE 角色
+      订阅/ACK/LOGIN_VERIFY 递交）；区块注入（scheduleChunkLoad/applyStep Mixin）与 fail closed。
+- [x] Auth Gateway 归 master（最小版）：slave 终止登录握手后递验证材料，master 记账
+      （防同一玩家加入多个 slave，SessionRegistry 重复会话拒新）+ offline 放行；LOGIN_VERIFY 系列
+      消息定义已落地（CACHE_PROTOCOL §9），Mojang 正版验证/签名/单次兑换随里程碑 5。
 
 验收：
 
-- [ ] 玩家只能经 slave 接入；直接连接 master 的任意流量被 RST；畸形/原版握手被 RST。
-- [ ] 同一玩家无法同时在多个 slave 建立会话（全局会话记账）。
-- [ ] slave 以 256M 堆启动并通过自检（不驻留区块、对象库落盘、静态数据懒加载）。
-- [ ] 文档中的拓扑/职责/约束与实现一致（AGENTS.md 组件归属同步）。
+- [x] 玩家只能经 slave 接入；直接连接 master 的任意流量被 RST；畸形/原版握手被 RST。
+- [x] 同一玩家无法同时在多个 slave 建立会话（全局会话记账：SessionRegistry 重复会话拒新）。
+- [x] slave 以 256M 堆启动并通过自检（不驻留区块、对象库落盘、静态数据懒加载；
+      MixinTargetVerifier 堆告警）。
+- [x] 文档中的拓扑/职责/约束与实现一致（AGENTS.md 组件归属同步）。
 
 ## 阶段 2：源服权威与快照（基线保持，修复期）
 

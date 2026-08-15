@@ -2,6 +2,7 @@ package cn.cubegarden.icbm.caching.control.replication;
 
 import cn.cubegarden.icbm.caching.protocol.ChunkRef;
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
+import cn.cubegarden.icbm.caching.protocol.Messages;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
@@ -39,9 +40,10 @@ public final class EventLog {
         }
     }
 
-    /** 单条事件（seq 为 master 事件序号，跨连接单调）。 */
+    /** 单条事件（seq 为 master 事件序号，跨连接单调；spawn 仅 WORLD_EPOCH 使用）。 */
     public record Event(long seq, EventType type, DimensionRef dimension,
-                        ChunkRef chunk, long revision, String payloadHash, String fingerprint) {
+                        ChunkRef chunk, long revision, String payloadHash, String fingerprint,
+                        Messages.SpawnPoint spawn) {
     }
 
     private final Path file;
@@ -85,11 +87,13 @@ public final class EventLog {
                 long revision = 0;
                 String hash = "";
                 String fingerprint = "";
+                Messages.SpawnPoint spawn = Messages.SpawnPoint.DEFAULT;
                 switch (type) {
                     case WORLD_EPOCH -> {
                         dimension = readDimension(in);
                         revision = in.readLong();
                         fingerprint = readString(in);
+                        spawn = readSpawn(in);
                     }
                     case INVALIDATE -> {
                         dimension = readDimension(in);
@@ -103,7 +107,8 @@ public final class EventLog {
                         hash = readString(in);
                     }
                 }
-                this.events.add(new Event(seq, type, dimension, chunk, revision, hash, fingerprint));
+                this.events.add(new Event(seq, type, dimension, chunk, revision, hash, fingerprint,
+                        spawn));
                 this.nextSeq = seq + 1;
             }
         }
@@ -111,9 +116,10 @@ public final class EventLog {
     }
 
     public synchronized long append(EventType type, DimensionRef dimension, ChunkRef chunk,
-                                    long revision, String payloadHash, String fingerprint) {
+                                    long revision, String payloadHash, String fingerprint,
+                                    Messages.SpawnPoint spawn) {
         long seq = this.nextSeq++;
-        Event event = new Event(seq, type, dimension, chunk, revision, payloadHash, fingerprint);
+        Event event = new Event(seq, type, dimension, chunk, revision, payloadHash, fingerprint, spawn);
         this.events.add(event);
         try {
             Files.createDirectories(this.file.getParent());
@@ -191,5 +197,18 @@ public final class EventLog {
         byte[] bytes = new byte[length];
         in.readFully(bytes);
         return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static void writeSpawn(DataOutputStream out, Messages.SpawnPoint spawn) throws IOException {
+        out.writeDouble(spawn.x());
+        out.writeDouble(spawn.y());
+        out.writeDouble(spawn.z());
+        out.writeFloat(spawn.yaw());
+        out.writeFloat(spawn.pitch());
+    }
+
+    private static Messages.SpawnPoint readSpawn(DataInputStream in) throws IOException {
+        return new Messages.SpawnPoint(in.readDouble(), in.readDouble(), in.readDouble(),
+                in.readFloat(), in.readFloat());
     }
 }

@@ -114,179 +114,10 @@ class SourceConnectorTest {
         this.encapsulated.start();
     }
 
-    // ---- 假源服（封装通道服务端，velocity 授信方向） ----
 
-    private static final class FakeBackendServer implements AutoCloseable {
-        final ServerSocket server;
-        final String secret;
-        final List<String> events = new CopyOnWriteArrayList<>();
-        final CountDownLatch helloAcked = new CountDownLatch(1);
-        final CountDownLatch putAckReceived = new CountDownLatch(1);
-        final AtomicLong sequence = new AtomicLong();
-        volatile boolean accepted;
-        volatile boolean connected;
 
-        private Socket socket;
-        private DataInputStream in;
-        private DataOutputStream out;
-        private EncapsulatedCipher encrypt; // server→client
-        private EncapsulatedCipher decrypt; // client→server
 
-        FakeBackendServer(String secret, String serverSecret) throws Exception {
-            this.secret = secret;          // master 侧配置（AUTH 客户端用它计算 token）
-            this.server = new ServerSocket(0);
-            byte[] expectedSecret = serverSecret.getBytes(StandardCharsets.UTF_8);
-            Thread t = new Thread(() -> {
-                try (Socket s = this.server.accept()) {
-                    s.setSoTimeout(8000);
-                    this.socket = s;
-                    this.in = new DataInputStream(new BufferedInputStream(s.getInputStream()));
-                    this.out = new DataOutputStream(new BufferedOutputStream(s.getOutputStream()));
-                    byte[] authFrame = readWireFrame(this.in);
-                    byte[] plaintext = EncapsulatedFrame.decodePlaintextPayload(authFrame);
-                    EncapsulatedHandshake.Auth auth = EncapsulatedHandshake.decodeAuth(plaintext);
-                    if (!AuthToken.verify(expectedSecret, auth.uuid(), auth.clientNonce(), auth.authToken())) {
-                        this.events.add("auth_rejected");
-                        writeAck(false, "auth failed");
-                        return;
-                    }
-                    byte[] serverNonce = new byte[ProtocolConstants.UUID_BYTES];
-                    new SecureRandom().nextBytes(serverNonce);
-                    writeAck(true, serverNonce);
-                    EncapsulatedCipher.SessionKeys keys = EncapsulatedCipher.SessionKeys.derive(
-                            expectedSecret, auth.clientNonce(), serverNonce, auth.uuid());
-                    this.encrypt = keys.serverToClient();
-                    this.decrypt = keys.clientToServer();
-                    this.connected = true;
-                    this.sendHello();
-                    // 等 HELLO_ACK
-                    while (true) {
-                        Envelope env = this.readControl();
-                        if (env.messageType() == MessageType.HELLO_ACK) {
-                            Messages.HelloAck ack = decode(MessageType.HELLO_ACK, env.body());
-                            this.accepted = ack.accepted();
-                            this.events.add("hello_ack:" + (ack.accepted() ? "accepted" : "rejected:" + ack.reason()));
-                            this.helloAcked.countDown();
-                            break;
-                        }
-                    }
-                    // 读循环：收 PUT_SNAPSHOT_ACK
-                    while (true) {
-                        Envelope env = this.readControl();
-                        if (env.messageType() == MessageType.PUT_SNAPSHOT_ACK) {
-                            Messages.PutSnapshotAck ack = decode(MessageType.PUT_SNAPSHOT_ACK, env.body());
-                            this.events.add("put_ack:" + ack.result());
-                            this.putAckReceived.countDown();
-                        }
-                    }
-                } catch (Exception e) {
-                    this.events.add("error:" + e.toString());
-                }
-            }, "fake-backend");
-            t.setDaemon(true);
-            t.start();
-        }
 
-        int port() {
-            return this.server.getLocalPort();
-        }
-
-        void sendHello() throws Exception {
-            byte[] body = encode(MessageType.HELLO, new Messages.Hello(
-                    Role.SOURCE, "lobby-1", "26.3", PROTOCOL, "0.19.3", "0.157.1+26.3",
-                    "modpack-hash", REGISTRY_FINGERPRINT, (byte) 0));
-            this.send(MessageType.HELLO, 1, 0, body);
-        }
-
-        void sendWorldEpoch(long epoch) throws Exception {
-            byte[] body = encode(MessageType.WORLD_EPOCH, new Messages.WorldEpoch(
-                    DIM, epoch, cn.cubegarden.icbm.caching.protocol.EpochReason.START, REGISTRY_FINGERPRINT));
-            this.send(MessageType.WORLD_EPOCH, 0, epoch, body);
-        }
-
-        void sendInvalidate(long revision) throws Exception {
-            byte[] body = encode(MessageType.INVALIDATE, new Messages.Invalidate(
-                    DIM, 3, -1, revision, InvalidateReason.BLOCK_STATE));
-            this.send(MessageType.INVALIDATE, 0, 1, body);
-        }
-
-        void sendPut(long revision, byte[] gzipPayload) throws Exception {
-            byte[] body = encode(MessageType.PUT_SNAPSHOT, new Messages.PutSnapshot(
-                    DIM, 3, -1, revision, ProtocolConstants.SNAPSHOT_FORMAT_NBT_CHUNK_V1,
-                    ProtocolConstants.COMPRESSION_GZIP, decompressedLength(gzipPayload),
-                    sha(gzipPayload), gzipPayload));
-            this.send(MessageType.PUT_SNAPSHOT, 7, 1, body);
-        }
-
-        void send(MessageType type, long requestId, long worldEpoch, byte[] body) throws Exception {
-            long seq = this.sequence.incrementAndGet();
-            Envelope envelope = Envelope.of(type, requestId, "source-server", worldEpoch, seq,
-                    System.currentTimeMillis(), body);
-            byte[] frameBody = FrameCodec.encodeFrame(envelope);
-            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encrypt, StreamId.CONTROL, frameBody);
-            synchronized (this.out) {
-                this.out.write(frame);
-                this.out.flush();
-            }
-        }
-
-        Envelope readControl() throws Exception {
-            byte[] frame = readWireFrame(this.in);
-            EncapsulatedFrame.Decrypted decrypted = EncapsulatedFrame.decodeEncryptedFrame(this.decrypt, frame);
-            assertEquals(StreamId.CONTROL, decrypted.stream());
-            return FrameCodec.decodeFrame(decrypted.body());
-        }
-
-        private void writeAck(boolean accepted, byte[] serverNonce) throws Exception {
-            byte[] ack = EncapsulatedFrame.encodePlaintextFrame(EncapsulatedHandshake.encodeAuthAck(
-                    new EncapsulatedHandshake.AuthAck(accepted, serverNonce, accepted ? "" : "auth failed")));
-            this.out.write(ack);
-            this.out.flush();
-        }
-
-        private void writeAck(boolean accepted, String reason) throws Exception {
-            byte[] ack = EncapsulatedFrame.encodePlaintextFrame(EncapsulatedHandshake.encodeAuthAck(
-                    new EncapsulatedHandshake.AuthAck(accepted, null, reason)));
-            this.out.write(ack);
-            this.out.flush();
-        }
-
-        @Override
-        public void close() throws Exception {
-            this.server.close();
-            if (this.socket != null) {
-                this.socket.close();
-            }
-        }
-    }
-
-    // ---- 工具 ----
-
-    private static byte[] readWireFrame(DataInputStream in) throws Exception {
-        byte[] magic = new byte[4];
-        in.readFully(magic);
-        int length = in.readInt();
-        byte[] payload = new byte[length];
-        in.readFully(payload);
-        byte[] frame = new byte[8 + length];
-        System.arraycopy(magic, 0, frame, 0, 4);
-        frame[4] = (byte) (length >>> 24);
-        frame[5] = (byte) (length >>> 16);
-        frame[6] = (byte) (length >>> 8);
-        frame[7] = (byte) length;
-        System.arraycopy(payload, 0, frame, 8, length);
-        return frame;
-    }
-
-    private static byte[] encode(MessageType type, Object message) throws Exception {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        MessageBodyCodecSafe.encode(type, new DataOutputStream(bytes), message);
-        return bytes.toByteArray();
-    }
-
-    private static <T> T decode(MessageType type, byte[] body) throws Exception {
-        return MessageBodyCodecSafe.decode(type, new DataInputStream(new ByteArrayInputStream(body)));
-    }
 
     private static byte[] gzipPayload(String content) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -311,7 +142,7 @@ class SourceConnectorTest {
 
     @Test
     void sourceEventsReachObjectStore() throws Exception {
-        try (FakeBackendServer backend = new FakeBackendServer(SECRET, SECRET)) {
+        try (TestBackendServer backend = new TestBackendServer(TestBackendServer.SECRET, TestBackendServer.SECRET)) {
             ServiceConfig withBackend = new ServiceConfig(
                     "127.0.0.1",
                     this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
@@ -347,7 +178,7 @@ class SourceConnectorTest {
 
     @Test
     void wrongSecretAuthRejected() throws Exception {
-        try (FakeBackendServer backend = new FakeBackendServer("wrong-secret", SECRET)) {
+        try (TestBackendServer backend = new TestBackendServer("wrong-secret", TestBackendServer.SECRET)) {
             ServiceConfig withBackend = new ServiceConfig(
                     "127.0.0.1",
                     this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
@@ -364,7 +195,7 @@ class SourceConnectorTest {
     @Test
     void slaveReceivesBackendSnapshot() throws Exception {
         this.startMasterEncapsulated();
-        try (FakeBackendServer backend = new FakeBackendServer(SECRET, SECRET)) {
+        try (TestBackendServer backend = new TestBackendServer(TestBackendServer.SECRET, TestBackendServer.SECRET)) {
             ServiceConfig withBackend = new ServiceConfig(
                     "127.0.0.1",
                     this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,

@@ -102,6 +102,20 @@ public final class EncapsulatedControlSession implements ControlSessionLogic.Tra
         this.logic.send(type, requestId, body);
     }
 
+    /** 发送 LOGIN_VERIFY 流（streamId=1）原始 body（无包络；登录验证结果回执）。 */
+    public void sendLoginVerify(byte[] body) {
+        try {
+            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.LOGIN_VERIFY, body);
+            synchronized (this.out) {
+                this.out.write(frame);
+                this.out.flush();
+            }
+        } catch (IOException e) {
+            LOGGER.warn("[control] LOGIN_VERIFY 发送失败: {}", e.getMessage());
+            this.fail("login verify send failed");
+        }
+    }
+
     /** 协议违规：发送 ERROR 后关闭（fail closed）。 */
     public void fail(String reason) {
         this.logic.fail(reason);

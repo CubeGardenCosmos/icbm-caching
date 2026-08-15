@@ -27,13 +27,20 @@ public final class Messages {
     public record HelloAck(boolean accepted, String reason, String serverId) {
     }
 
-    /** WORLD_EPOCH：新 epoch 立即使对应维度旧对象不可读。 */
+    /** WORLD_EPOCH：新 epoch 立即使对应维度旧对象不可读；spawn 为维度出生点（slave 放置玩家用，
+     * 26.3 LevelData.RespawnData(GlobalPos, yaw, pitch) 快照）。 */
     public record WorldEpoch(
             DimensionRef dimension,
             long worldEpoch,
             EpochReason reason,
-            String registryAndDatapackFingerprint
+            String registryAndDatapackFingerprint,
+            SpawnPoint spawn
     ) {
+    }
+
+    /** 维度出生点（slave join 时放置玩家的基准；失败时默认 0/64/0）。 */
+    public record SpawnPoint(double x, double y, double z, float yaw, float pitch) {
+        public static final SpawnPoint DEFAULT = new SpawnPoint(0.0, 64.0, 0.0, 0.0F, 0.0F);
     }
 
     /** INVALIDATE：先提高该区块 requiredRevision。 */

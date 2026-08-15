@@ -1,6 +1,7 @@
 package cn.cubegarden.icbm.caching.source.snapshot;
 
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
+import cn.cubegarden.icbm.caching.protocol.Messages;
 import cn.cubegarden.icbm.caching.source.revision.ChunkKey;
 
 /**
@@ -48,8 +49,9 @@ public interface SnapshotSink extends AutoCloseable {
     /** 原子设置 committedRevision（对应控制服务验证后提交）。 */
     void commitRevision(ChunkKey key, long revision, CommitCallback done);
 
-    /** 维度 epoch 切换（对应 WORLD_EPOCH）：新 epoch 使旧对象不可读。 */
-    void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint);
+    /** 维度 epoch 切换（对应 WORLD_EPOCH）：新 epoch 使旧对象不可读；spawn 为维度出生点。 */
+    void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint,
+                       Messages.SpawnPoint spawn);
 
     @Override
     void close();

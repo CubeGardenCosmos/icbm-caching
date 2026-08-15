@@ -122,9 +122,10 @@ public final class RemoteSnapshotSink implements SnapshotSink {
     }
 
     @Override
-    public void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint) {
+    public void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint,
+                              Messages.SpawnPoint spawn) {
         this.knownEpochs.put(dimension, epoch);
-        this.outbox.add(() -> this.sendWorldEpoch(dimension, epoch, reason, registryFingerprint));
+        this.outbox.add(() -> this.sendWorldEpoch(dimension, epoch, reason, registryFingerprint, spawn));
     }
 
     @Override
@@ -173,7 +174,8 @@ public final class RemoteSnapshotSink implements SnapshotSink {
                                 snapshot.uncompressedLength(), snapshot.payloadHash(), snapshot.payload())));
     }
 
-    private void sendWorldEpoch(DimensionRef dimension, long epoch, String reason, String fingerprint) {
+    private void sendWorldEpoch(DimensionRef dimension, long epoch, String reason, String fingerprint,
+                                Messages.SpawnPoint spawn) {
         BackendControlSession s = this.session;
         if (s == null) {
             return;
@@ -181,7 +183,7 @@ public final class RemoteSnapshotSink implements SnapshotSink {
         s.send(MessageType.WORLD_EPOCH, 0, epoch,
                 cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.encode(
                         MessageType.WORLD_EPOCH,
-                        new Messages.WorldEpoch(dimension, epoch, mapReason(reason), fingerprint)));
+                        new Messages.WorldEpoch(dimension, epoch, mapReason(reason), fingerprint, spawn)));
     }
 
     private static EpochReason mapReason(String reason) {

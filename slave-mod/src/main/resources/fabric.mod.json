@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "icbm_slave",
+  "version": "${version}",
+  "name": "ICBM Slave",
+  "description": "ICBM Caching slave Fabric 模组后端：缓存会话（原生 MC 服务器进程，只做协议与预测，不做世界计算）",
+  "authors": ["CubeGarden Studio"],
+  "license": "GPL-3.0-only",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "cn.cubegarden.icbm.caching.slave.SlaveMod"
+    ]
+  },
+  "mixins": [
+    "icbm_slave.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "fabric-api": "*",
+    "minecraft": "~26.3-",
+    "java": ">=25"
+  }
+}

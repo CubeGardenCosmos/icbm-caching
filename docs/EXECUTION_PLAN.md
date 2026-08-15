@@ -68,22 +68,26 @@
       epoch + serverName 分域 + slave 订阅收到 backend 推送 + 错误 secret fail closed）；
       RemoteSnapshotSinkTest 迁移（假 master 主动连接）；无玩家时事件可达（master 主动连接）。
 
-## 里程碑 4：slave Fabric 模组（新组件 slave-mod/，最大块）
+## 里程碑 4：slave Fabric 模组（新组件 slave-mod/，已完成）
 
-- [ ] 草稿 `draft/slave-fabric-backend/` 三步流程（参考：fabric/velocity；官方：minecraft-assets
-      的 ChunkMap/ChunkSerializer/ServerGamePacketListenerImpl；差异：不做世界计算）。
-- [ ] 区块来源接管：快照 NBT → LevelChunk（26.3 `SerializableChunkData` 解析注入）；
-      生成器禁用/替换；未命中/落后/epoch 不匹配 fail closed（不本地生成“幽灵区块”）。
-- [ ] 事件接管：ServerPlayNetworkHandler 钩子拦截互动 → 拒绝（旁观）/预测占位；禁持久化
-      （独立世界目录、禁 save、启动自检）。
-- [ ] 封装通道客户端：公共密码 + UUID 握手 → ChaCha20-Poly1305；订阅快照/失效；登录验证
-      材料递交（LOGIN_VERIFY_REQ，master 返回前不放行）。
-- [ ] 256M 约束：磁盘对象库（SnapshotObjectStore）、按需装载、注入即释放、堆占用启动自检
-      （复用 fabric-source 的 MixinTargetVerifier 自检模式）。
-- [ ] 迁移 virtual-backend 的 Nbt / 对象库 / ServeGate / 复制逻辑（ChunkDataEncoder 等
-      vanilla 钩子路线不再需要，区块由 vanilla 网络层编码）。
-- [ ] 验收：玩家经 slave 旁观（缓存世界）；移动不触发源服加载；未命中不展示旧区块；
-      256M 堆稳定；重复会话被拒。
+- [x] 草稿 `draft/slave-fabric-backend/` 三步流程（参考 fabric-source/velocity/virtual-backend；
+      官方 ChunkMap.scheduleChunkLoad/SerializableChunkData/ChunkPyramid/ServerLoginPacketListenerImpl/…；
+      差异：不 worldgen、不 tick 模拟、不持久化写回、fail closed）。
+- [x] 区块来源接管：Mixin ChunkMap.scheduleChunkLoad——对象库命中（master 连接 + committed≥required
+      + epoch 匹配）→ SerializableChunkData.parse/read 注入 FULL 快照（生成管道 canLoadWithoutGeneration
+      跳过生成）；未命中 → EMPTY（不展示旧区块）。Mixin ChunkMap.applyStep 跳过全部非 FULL 生成步骤。
+- [x] 事件接管：PlayerBounds（未命中区块拒绝移动，撞墙语义）；SpectateGate（互动四件套拒绝，旁观）；
+      SaveGate 禁持久化（独立世界目录 + ChunkMap 保存拦截，缓存是唯一持久层）。
+- [x] 封装通道客户端（SlaveControlClient，ReplicationClient 迁移）：SLAVE HELLO（serverName+指纹）→
+      SUBSCRIBE → 事件应用（含 WORLD_EPOCH spawn）→ ACK；断线重连重订阅；LOGIN_VERIFY_REQ 递交
+      （LoginVerifyGateMixin 接管 handleKey，master 返回前不放行）。
+- [x] 256M 约束：磁盘对象库（SnapshotObjectStore）、注入即释放、MixinTargetVerifier 自检（含堆告警）。
+- [x] 协议变更（同一提交）：WORLD_EPOCH 携带 spawn（源服 RespawnData；事件日志/两侧 codec/golden 同步）。
+- [x] master 最小 Auth Gateway：SessionRegistry（登记/注销/重复会话拒新）+ AuthGatewayListener
+      （LOGIN_VERIFY 流服务，offline 放行仍记账）；SESSION_CLOSED 注销落地。
+- [x] 验收：SlaveControlClientTest（假 master：HELLO/SUBSCRIBE/事件入对象库/spawn/ACK/错 PSK 拒）；
+      AuthGatewayTest（LOGIN_VERIFY 放行 + 重复会话拒新 + SESSION_CLOSED 注销）；全组件测试绿。
+      （真实玩家经 slave 旁观由里程碑 6 端到端验证：测试服务器装配 slave 世界 + 玩家会话。）
 
 ## 里程碑 5：master 统筹与权威会话桥
 

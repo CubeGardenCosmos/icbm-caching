@@ -273,7 +273,8 @@ class EncapsulatedControlServerTest {
             assertTrue(ack.accepted(), "源 HELLO 被拒绝: " + ack.reason());
 
             source.send(MessageType.WORLD_EPOCH, new Messages.WorldEpoch(DIM, 1,
-                    cn.cubegarden.icbm.caching.protocol.EpochReason.START, REGISTRY_FINGERPRINT));
+                    cn.cubegarden.icbm.caching.protocol.EpochReason.START, REGISTRY_FINGERPRINT,
+                    Messages.SpawnPoint.DEFAULT));
             source.worldEpoch = 1; // 后续包络携带源侧当前 epoch
             source.send(MessageType.INVALIDATE, new Messages.Invalidate(DIM, 3, -1, 7,
                     cn.cubegarden.icbm.caching.protocol.InvalidateReason.BLOCK_STATE));
@@ -308,7 +309,8 @@ class EncapsulatedControlServerTest {
             source.sendHello(Role.SOURCE, "lobby-1");
             assertTrue(decode(source.readControl()) instanceof Messages.HelloAck ack && ack.accepted());
             source.send(MessageType.WORLD_EPOCH, new Messages.WorldEpoch(DIM, 1,
-                    cn.cubegarden.icbm.caching.protocol.EpochReason.START, REGISTRY_FINGERPRINT));
+                    cn.cubegarden.icbm.caching.protocol.EpochReason.START, REGISTRY_FINGERPRINT,
+                    Messages.SpawnPoint.DEFAULT));
             source.worldEpoch = 1; // 后续包络携带源侧当前 epoch
             source.send(MessageType.INVALIDATE, new Messages.Invalidate(DIM, 3, -1, 7,
                     cn.cubegarden.icbm.caching.protocol.InvalidateReason.BLOCK_STATE));

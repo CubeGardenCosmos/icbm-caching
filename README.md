@@ -19,11 +19,13 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
   模组监听 backend 端口（`icbm.backend.*`，PSK = forwarding secret），master 主动连接（无玩家
   在线也可用），方向与 slave 封装通道相反（源服发 HELLO，master 验证）。
 - **master（`velocity-plugin/`，含已并入的 `cn.cubegarden.icbm.caching.control` 包）**：唯一信任根与
-  决策中心；Mojang 正版验证、全局会话记账（防同一玩家加入多个 slave）、单端口封装通道、
-  required/committed revision 快照聚合。独立进程形态入口 `ControlServiceMain`（Velocity 插件
-  入口于阶段 5 接线）。
-- **slave（`slave-mod/`，规划中；现由 `virtual-backend/` 作为只读变体参考）**：原生 MC 服务器进程
-  上的 Fabric 模组，装载 committed snapshot，未命中/落后/epoch 不匹配 fail closed；256M JVM 约束。
+  决策中心；Auth Gateway（Mojang 正版验证与签名随里程碑 5，最小版已记账）、全局会话记账
+  （防同一玩家加入多个 slave，重复会话拒新）、单端口封装通道、required/committed revision 快照
+  聚合。独立进程形态入口 `ControlServiceMain`（Velocity 插件入口于阶段 5 接线）。
+- **slave（`slave-mod/`）**：原生 MC 服务器进程上的 Fabric 模组（只做协议与预测，不做世界计算）；
+  对象库命中注入 FULL 快照区块（SerializableChunkData 解析），未命中/落后/epoch 不匹配 fail closed
+  （EMPTY 不生成 + 玩家移动边界拦截）；旁观（互动拒绝）；禁持久化；SLAVE 角色封装通道客户端
+  （订阅/ACK/LOGIN_VERIFY 递交）；256M JVM 约束。`virtual-backend/` 保留为只读变体参考。
 - **`protocol/`**：跨组件共享控制协议（包络/消息编解码/对象库/封装通道层，纯 Java 25）。
 
 ## 开发环境
@@ -32,7 +34,7 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
 
 - `uv run build/main.py init`：部署 JDK 25、克隆参考仓库（Fabric/Velocity）、部署测试服务器、
   反编译 26.3-snapshot-8 服务端源码（行为分析最高权重参考）。
-- `uv run build/main.py test`：运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source）。
+- `uv run build/main.py test`：运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source/slave-mod）。
 - `uv run build/main.py server|control|reinit|cleanup`：测试服务器 / master 控制服务（封装通道
   11420，生成 PSK 与 UUID 角色绑定）/ 破坏性重置与清理（见 `build/README.md`）。
 

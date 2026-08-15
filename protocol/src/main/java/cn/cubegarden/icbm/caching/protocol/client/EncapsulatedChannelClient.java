@@ -79,6 +79,10 @@ public class EncapsulatedChannelClient implements AutoCloseable {
         default void onMessage(MessageType type, Envelope envelope, byte[] body) {
         }
 
+        /** LOGIN_VERIFY 流（streamId=1）：master 回 LOGIN_VERIFY_RES 原始 body（无包络）。 */
+        default void onLoginVerifyResponse(byte[] body) {
+        }
+
         /** 连接关闭（非拒绝路径）。 */
         default void onDisconnected(Throwable cause) {
         }
@@ -307,8 +311,16 @@ public class EncapsulatedChannelClient implements AutoCloseable {
     private void readLoop() {
         try {
             while (!this.closed) {
-                Envelope envelope = this.readControlFrame();
-                this.listener.onMessage(envelope.messageType(), envelope, envelope.body());
+                byte[] wireFrame = this.readWireFrame();
+                EncapsulatedFrame.Decrypted decrypted = EncapsulatedFrame.decodeEncryptedFrame(this.decryptCipher, wireFrame);
+                switch (decrypted.stream()) {
+                    case CONTROL -> {
+                        Envelope envelope = FrameCodec.decodeFrame(decrypted.body());
+                        this.listener.onMessage(envelope.messageType(), envelope, envelope.body());
+                    }
+                    case LOGIN_VERIFY -> this.listener.onLoginVerifyResponse(decrypted.body());
+                    case MC_PASSTHROUGH -> throw new IOException("非控制流帧: " + decrypted.stream());
+                }
             }
         } catch (IOException e) {
             if (this.closed) {
@@ -374,6 +386,27 @@ public class EncapsulatedChannelClient implements AutoCloseable {
             return true;
         } catch (IOException e) {
             LOGGER.warn("[icbm-encap] 发送失败: {}", e.getMessage());
+            this.listener.onDisconnected(e);
+            this.closeSocket();
+            return false;
+        }
+    }
+
+    /** 发送 LOGIN_VERIFY 流（streamId=1）原始 body（无包络；登录验证材料递交）。 */
+    public boolean sendLoginVerify(byte[] body) {
+        DataOutputStream out = this.out;
+        if (out == null || !this.isConnected() || this.encryptCipher == null) {
+            return false;
+        }
+        try {
+            synchronized (out) {
+                byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.LOGIN_VERIFY, body);
+                out.write(frame);
+                out.flush();
+            }
+            return true;
+        } catch (IOException e) {
+            LOGGER.warn("[icbm-encap] LOGIN_VERIFY 发送失败: {}", e.getMessage());
             this.listener.onDisconnected(e);
             this.closeSocket();
             return false;
