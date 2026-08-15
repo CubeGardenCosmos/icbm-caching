@@ -1,7 +1,7 @@
 package cn.cubegarden.icbm.caching.control.replication;
 
 import cn.cubegarden.icbm.caching.control.config.ServiceConfig;
-import cn.cubegarden.icbm.caching.control.net.PeerSession;
+import cn.cubegarden.icbm.caching.control.net.ControlSession;
 import cn.cubegarden.icbm.caching.protocol.ChunkRef;
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
 import cn.cubegarden.icbm.caching.protocol.EpochReason;
@@ -38,7 +38,7 @@ public final class Replicator {
 
     /** 单个 slave 订阅状态（随连接生命周期，无全局可变状态）。 */
     public static final class SlaveSubscription {
-        final PeerSession session;
+        final ControlSession session;
         final Set<DimensionRef> dimensions;
         volatile long ackedSequence;
         volatile long lastReceivedSequence;
@@ -46,7 +46,7 @@ public final class Replicator {
         volatile boolean lagging;
         final ArrayDeque<EventLog.Event> pending = new ArrayDeque<>();
 
-        SlaveSubscription(PeerSession session, Set<DimensionRef> dimensions, long ackedSequence) {
+        SlaveSubscription(ControlSession session, Set<DimensionRef> dimensions, long ackedSequence) {
             this.session = session;
             this.dimensions = dimensions;
             this.ackedSequence = ackedSequence;
@@ -71,7 +71,7 @@ public final class Replicator {
     }
 
     /** SUBSCRIBE：注册订阅并重放 ackedSequence 之后的事件（断线补发/epoch/失效全部经日志）。 */
-    public void subscribe(PeerSession session, Messages.Subscribe msg) {
+    public void subscribe(ControlSession session, Messages.Subscribe msg) {
         Set<DimensionRef> dimensions = new HashSet<>(Arrays.asList(msg.dimensions()));
         SlaveSubscription sub = new SlaveSubscription(session, dimensions, msg.ackedSequence());
         this.subscriptions.put(session.sourceServerId(), sub);
@@ -85,7 +85,7 @@ public final class Replicator {
         }
     }
 
-    public void onAck(PeerSession session, Messages.Ack ack) {
+    public void onAck(ControlSession session, Messages.Ack ack) {
         SlaveSubscription sub = this.subscriptions.get(session.sourceServerId());
         if (sub == null) {
             return;
@@ -119,7 +119,7 @@ public final class Replicator {
     public void heartbeatTick() {
         long now = System.currentTimeMillis();
         for (SlaveSubscription sub : this.subscriptions.values()) {
-            PeerSession session = sub.session;
+            ControlSession session = sub.session;
             if (!session.isActive()) {
                 continue;
             }
@@ -133,7 +133,7 @@ public final class Replicator {
         }
     }
 
-    public void onDisconnected(PeerSession session) {
+    public void onDisconnected(ControlSession session) {
         this.subscriptions.remove(session.sourceServerId());
     }
 
@@ -172,7 +172,7 @@ public final class Replicator {
     }
 
     private void writeEvent(SlaveSubscription sub, EventLog.Event event) {
-        PeerSession session = sub.session;
+        ControlSession session = sub.session;
         MessageType type;
         Object body;
         switch (event.type()) {

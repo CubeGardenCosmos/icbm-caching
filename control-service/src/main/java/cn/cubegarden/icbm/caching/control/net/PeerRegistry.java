@@ -8,15 +8,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 对等方注册表：证书 CN → 角色绑定、HELLO 注册（sourceServerId → 会话/角色）、
- * 源指纹注册（slave 指纹必须与源一致——CACHE_PROTOCOL「fingerprint 不一致时拒绝快照复用」）。
+ * 对等方注册表：鉴权绑定（mTLS 证书 CN 或封装通道 AUTH UUID）→ 角色绑定、HELLO 注册
+ * （sourceServerId → 会话/角色）、源指纹注册（slave 指纹必须与源一致——CACHE_PROTOCOL
+ * 「fingerprint 不一致时拒绝快照复用」）。
  */
 public final class PeerRegistry {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PeerRegistry.class);
 
-    private final Map<String, String> roleBindings; // cert CN -> role 名
-    private final ConcurrentMap<String, PeerSession> sessions = new ConcurrentHashMap<>(); // sourceServerId -> session
+    private final Map<String, String> roleBindings; // bindingId(cert CN / UUID) -> role 名
+    private final ConcurrentMap<String, ControlSession> sessions = new ConcurrentHashMap<>(); // sourceServerId -> session
     private final ConcurrentMap<String, Role> roles = new ConcurrentHashMap<>();           // sourceServerId -> role
     private volatile String sourceModpackFingerprint = "";
     private volatile String sourceRegistryFingerprint = "";
@@ -25,22 +26,22 @@ public final class PeerRegistry {
         this.roleBindings = Map.copyOf(roleBindings);
     }
 
-    /** 证书 CN 绑定角色；未配置绑定 → null（调用方按策略拒绝）。 */
-    public Role roleForCert(String certCn) {
-        String roleName = this.roleBindings.get(certCn);
+    /** 鉴权绑定标识（证书 CN / UUID）绑定角色；未配置绑定 → null（调用方按策略拒绝）。 */
+    public Role roleForBinding(String bindingId) {
+        String roleName = this.roleBindings.get(bindingId);
         return roleName == null ? null : Role.valueOf(roleName);
     }
 
     /**
      * HELLO 校验并注册。返回拒绝原因（null 表示接受）。
-     * 规则：证书 CN 绑定角色必须与 HELLO.role 一致；源必须带非空指纹；
+     * 规则：鉴权绑定角色必须与 HELLO.role 一致；源必须带非空指纹；
      * slave 的指纹必须与已注册源的指纹一致。
      */
-    public String register(PeerSession session, Role helloRole, String modpackFingerprint,
+    public String register(ControlSession session, Role helloRole, String modpackFingerprint,
                            String registryFingerprint) {
-        Role boundRole = this.roleForCert(session.certCn());
+        Role boundRole = this.roleForBinding(session.bindingId());
         if (boundRole != null && boundRole != helloRole) {
-            return "证书 CN " + session.certCn() + " 绑定角色 " + boundRole
+            return "鉴权绑定 " + session.bindingId() + " 绑定角色 " + boundRole
                     + " 与 HELLO.role " + helloRole + " 不一致";
         }
         if (helloRole == Role.SOURCE) {
@@ -65,7 +66,7 @@ public final class PeerRegistry {
         }
         this.sessions.put(session.sourceServerId(), session);
         this.roles.put(session.sourceServerId(), helloRole);
-        LOGGER.info("[control] peer 注册: id={} role={} cn={}", session.sourceServerId(), helloRole, session.certCn());
+        LOGGER.info("[control] peer 注册: id={} role={} binding={}", session.sourceServerId(), helloRole, session.bindingId());
         return null;
     }
 

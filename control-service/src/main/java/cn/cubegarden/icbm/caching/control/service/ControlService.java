@@ -2,7 +2,7 @@ package cn.cubegarden.icbm.caching.control.service;
 
 import cn.cubegarden.icbm.caching.control.config.ServiceConfig;
 import cn.cubegarden.icbm.caching.control.net.PeerRegistry;
-import cn.cubegarden.icbm.caching.control.net.PeerSession;
+import cn.cubegarden.icbm.caching.control.net.ControlSession;
 import cn.cubegarden.icbm.caching.control.replication.EventLog;
 import cn.cubegarden.icbm.caching.control.replication.Replicator;
 import cn.cubegarden.icbm.caching.protocol.ChunkRef;
@@ -43,7 +43,7 @@ public final class ControlService implements AutoCloseable {
         this.runtimeProtocol = config.runtimeProtocol();
     }
 
-    public void onWorldEpoch(PeerSession session, Messages.WorldEpoch msg) {
+    public void onWorldEpoch(ControlSession session, Messages.WorldEpoch msg) {
         session.requireRole(Role.SOURCE);
         this.store.announceEpoch(msg.dimension(), msg.worldEpoch());
         long seq = this.eventLog.append(EventLog.EventType.WORLD_EPOCH, msg.dimension(), null,
@@ -52,7 +52,7 @@ public final class ControlService implements AutoCloseable {
         LOGGER.info("[control] WORLD_EPOCH: dim={} epoch={} reason={}", msg.dimension(), msg.worldEpoch(), msg.reason());
     }
 
-    public void onInvalidate(PeerSession session, Messages.Invalidate msg) {
+    public void onInvalidate(ControlSession session, Messages.Invalidate msg) {
         session.requireRole(Role.SOURCE);
         ChunkRef key = ChunkRef.of(msg.dimension(), msg.chunkX(), msg.chunkZ());
         this.store.raiseRequired(key, msg.revision());
@@ -62,7 +62,7 @@ public final class ControlService implements AutoCloseable {
     }
 
     /** PUT_SNAPSHOT：校验 → 持久化 → 原子 committed → 日志 → 推送；失败保持 required（fail closed）。 */
-    public PutResult onPutSnapshot(PeerSession session, Messages.PutSnapshot msg) {
+    public PutResult onPutSnapshot(ControlSession session, Messages.PutSnapshot msg) {
         session.requireRole(Role.SOURCE);
         ChunkRef key = ChunkRef.of(msg.dimension(), msg.chunkX(), msg.chunkZ());
         PutResult result = this.store.put(key, msg.revision(), session.worldEpoch(),
@@ -87,7 +87,7 @@ public final class ControlService implements AutoCloseable {
      * RESOLVE_CHUNK：protocol/fingerprint 不匹配 → INCOMPATIBLE；源未注册或服务关闭 → UNAVAILABLE；
      * 其余委托对象库（HIT/MISS/STALE/INCOMPATIBLE）。
      */
-    public Messages.ResolveChunkRes onResolveChunk(PeerSession session, Messages.ResolveChunkReq msg) {
+    public Messages.ResolveChunkRes onResolveChunk(ControlSession session, Messages.ResolveChunkReq msg) {
         if (msg.expectedProtocol() != this.runtimeProtocol) {
             return new Messages.ResolveChunkRes(msg.dimension(), msg.chunkX(), msg.chunkZ(),
                     ResolveStatus.INCOMPATIBLE, 0, "", "");
@@ -114,7 +114,7 @@ public final class ControlService implements AutoCloseable {
     }
 
     /** ADMIN_INVALIDATE：chunk/region/dimension/world 范围失效（审计原因记录到日志）。 */
-    public void onAdminInvalidate(PeerSession session, Messages.AdminInvalidate msg) {
+    public void onAdminInvalidate(ControlSession session, Messages.AdminInvalidate msg) {
         session.requireRole(Role.SOURCE);
         switch (msg.scope()) {
             case "CHUNK" -> {
@@ -143,18 +143,18 @@ public final class ControlService implements AutoCloseable {
         LOGGER.warn("[control] ADMIN_INVALIDATE: scope={} dim={} reason={}", msg.scope(), msg.dimension(), msg.reason());
     }
 
-    public void onSubscribe(PeerSession session, Messages.Subscribe msg) {
+    public void onSubscribe(ControlSession session, Messages.Subscribe msg) {
         session.requireSlaveRole();
         this.replicator.subscribe(session, msg);
     }
 
-    public void onAck(PeerSession session, Messages.Ack msg) {
+    public void onAck(ControlSession session, Messages.Ack msg) {
         session.requireSlaveRole();
         this.replicator.onAck(session, msg);
     }
 
     /** RESYNC：以 fromRevision 为下限重拉维度内已提交对象（日志裁剪后的兜底路径）。 */
-    public Messages.ResyncRes onResync(PeerSession session, Messages.ResyncReq msg) {
+    public Messages.ResyncRes onResync(ControlSession session, Messages.ResyncReq msg) {
         session.requireSlaveRole();
         List<ChunkRef> chunks = this.store.chunksInDimension(msg.dimension());
         int replayed = 0;
