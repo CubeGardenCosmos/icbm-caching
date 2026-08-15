@@ -23,7 +23,7 @@ public final class MixinTargetVerifier {
         boolean ok = checkMethod("net.minecraft.server.level.ChunkMap", "scheduleChunkLoad")
                 && checkMethod("net.minecraft.server.level.ChunkMap", "applyStep")
                 && checkMethod("net.minecraft.server.level.ChunkMap", "saveAllChunks")
-                && checkMethod("net.minecraft.server.level.ChunkMap", "saveChunksEagerly")
+                && checkMethod("net.minecraft.server.level.ChunkMap", "save")
                 && checkClass("net.minecraft.world.level.chunk.storage.SerializableChunkData")
                 && checkMethod("net.minecraft.server.network.ServerLoginPacketListenerImpl", "handleHello")
                 && checkMethod("net.minecraft.server.network.ServerLoginPacketListenerImpl", "handleKey")
