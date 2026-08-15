@@ -144,19 +144,19 @@ public final class IcbmSource implements ModInitializer {
             }
         }
         String host = props.getProperty("icbm.control.host", "").trim();
-        if (host.isEmpty()) {
-            LOGGER.warn("[icbm-source] 未配置 icbm.control.host，使用本地对象库 sink（开发模式）");
-            return new LocalSnapshotSink(
-                    server.getWorldPath(LevelResource.ROOT).resolve("icbm_snapshots"));
-        }
-        int port = Integer.parseInt(props.getProperty("icbm.control.port", "11420"));
+        // serverName：velocity.toml 服务器名（缓存隔离键，CACHE_PROTOCOL §1）；缺省退回 sourceServerId
         String sourceServerId = props.getProperty("icbm.control.sourceServerId",
                 "source-" + UUID.randomUUID().toString().substring(0, 8));
-        // serverName：velocity.toml 服务器名（缓存隔离键，CACHE_PROTOCOL §1）；缺省退回 sourceServerId
         String serverName = props.getProperty("icbm.control.serverName", sourceServerId).trim();
         if (serverName.isEmpty()) {
             serverName = sourceServerId;
         }
+        if (host.isEmpty()) {
+            LOGGER.warn("[icbm-source] 未配置 icbm.control.host，使用本地对象库 sink（开发模式）");
+            return new LocalSnapshotSink(
+                    server.getWorldPath(LevelResource.ROOT).resolve("icbm_snapshots"), serverName);
+        }
+        int port = Integer.parseInt(props.getProperty("icbm.control.port", "11420"));
         Path keyStore = resolve(server, props.getProperty("icbm.control.keystore", ""));
         String keyStorePassword = props.getProperty("icbm.control.keystorePassword", "");
         Path trustStore = resolve(server, props.getProperty("icbm.control.truststore", ""));

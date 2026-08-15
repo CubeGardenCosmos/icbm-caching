@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import cn.cubegarden.icbm.caching.source.revision.ChunkKey;
+import cn.cubegarden.icbm.caching.protocol.store.SnapshotObjectStore;
 import cn.cubegarden.icbm.caching.source.revision.ModpackFingerprint;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,7 +31,8 @@ class LocalSnapshotSinkTest {
     }
 
     private Path chunkDir() {
-        return this.root.resolve("minecraft").resolve("overworld").resolve("3").resolve("-1");
+        return this.root.resolve(SnapshotObjectStore.DEFAULT_SERVER_NAME)
+                .resolve("minecraft").resolve("overworld").resolve("3").resolve("-1");
     }
 
     /** 构造有效 GZIP payload（未压缩长度为 raw 长度）。 */
@@ -58,7 +60,8 @@ class LocalSnapshotSinkTest {
         assertEquals("7", Files.readString(dir.resolve("committed.rev")).trim());
         // epoch 位于维度目录（快照 epoch 由 put 校验，不落每区块 epoch 文件）
         assertEquals("1", Files.readString(
-                this.root.resolve("minecraft").resolve("overworld").resolve("epoch")).trim());
+                this.root.resolve(SnapshotObjectStore.DEFAULT_SERVER_NAME)
+                        .resolve("minecraft").resolve("overworld").resolve("epoch")).trim());
         assertTrue(Files.exists(dir.resolve("7/snapshot.nbt.gz")));
         assertTrue(Files.exists(dir.resolve("7/metadata.json")));
     }

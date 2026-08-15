@@ -28,7 +28,8 @@
       - golden 序列化测试锁定线上布局（AUTH token RFC 5869/HMAC 向量、帧布局、篡改检测、RST）。
 - [x] 角色重定义：SOURCE / SLAVE（迁移 VIRTUAL_BACKEND/VELOCITY）；HELLO 增加 serverName。
 - [x] 新消息：LOGIN_VERIFY_REQ/RES、SESSION_CLOSED（CACHE_PROTOCOL §9）+ codec + golden 测试。
-- [ ] 缓存键扩展：serverName 进入（对象库目录结构按 serverName 分域）。
+- [x] 缓存键扩展：serverName 进入（对象库目录结构按 serverName 分域
+      `<root>/<serverName>/<namespace>/<path>/...`，隔离测试锁定）。
 - [ ] 验收：旧消息不回归（现有组件测试通过）；golden 字节锁定；畸形帧/非 magic 连接 RST 测试。
 
 ## 里程碑 2：control-service 并入 master

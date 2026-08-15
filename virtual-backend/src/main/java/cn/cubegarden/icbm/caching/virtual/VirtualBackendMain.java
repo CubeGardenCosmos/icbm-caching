@@ -57,7 +57,7 @@ public final class VirtualBackendMain implements AutoCloseable {
             throw new IllegalStateException("启动指纹校验失败（fail closed）: " + fingerprintError);
         }
 
-        this.store = new SnapshotObjectStore(Path.of(config.storeRoot()));
+        this.store = new SnapshotObjectStore(Path.of(config.storeRoot()), config.serverId());
         this.store.recover();
 
         DimensionRef dimension = new DimensionRef(config.dimensionNamespace(), config.dimensionPath());

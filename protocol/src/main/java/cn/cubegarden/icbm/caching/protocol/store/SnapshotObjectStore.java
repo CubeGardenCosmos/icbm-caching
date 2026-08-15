@@ -22,13 +22,13 @@ import java.util.zip.GZIPInputStream;
 /**
  * 版本化区块 NBT 快照对象库（CACHE_PROTOCOL.md §2 PUT_SNAPSHOT + 草稿 phase2-control-protocol §4.1/4.3）。
  *
- * <p>磁盘布局（唯一实现，两侧复用）：
+ * <p>磁盘布局（唯一实现，两侧复用；阶段1 起按 serverName 分域，缓存隔离键，CACHE_PROTOCOL §1）：
  * <pre>
- * {@code <root>/<namespace>/<path>/epoch}                       维度当前 epoch（原子写）
- * {@code <root>/<namespace>/<path>/<x>/<z>/required.rev}        requiredRevision（仅增）
- * {@code <root>/<namespace>/<path>/<x>/<z>/committed.rev}       committedRevision（原子写）
- * {@code <root>/<namespace>/<path>/<x>/<z>/<rev>/snapshot.nbt.gz}
- * {@code <root>/<namespace>/<path>/<x>/<z>/<rev>/metadata.json} 格式/epoch/hash/大小
+ * {@code <root>/<serverName>/<namespace>/<path>/epoch}                    维度当前 epoch（原子写）
+ * {@code <root>/<serverName>/<namespace>/<path>/<x>/<z>/required.rev}    requiredRevision（仅增）
+ * {@code <root>/<serverName>/<namespace>/<path>/<x>/<z>/committed.rev}   committedRevision（原子写）
+ * {@code <root>/<serverName>/<namespace>/<path>/<x>/<z>/<rev>/snapshot.nbt.gz}
+ * {@code <root>/<serverName>/<namespace>/<path>/<x>/<z>/<rev>/metadata.json} 格式/epoch/hash/大小
  * </pre>
  *
  * <p>一致性（验收 2：乱序、重放、损坏快照不能降低 revision 或覆盖新对象）：
@@ -69,16 +69,32 @@ public final class SnapshotObjectStore implements AutoCloseable {
     }
 
     private final Path root;
+    private final String serverName;
     private final ConcurrentMap<ChunkRef, ChunkIndex> index = new ConcurrentHashMap<>();
     private final ConcurrentMap<DimensionRef, Long> dimensionEpochs = new ConcurrentHashMap<>();
     private volatile boolean ready;
 
+    /** serverName 缺省值（单参构造为测试/开发便利；生产必须显式指定缓存隔离键）。 */
+    public static final String DEFAULT_SERVER_NAME = "default";
+
     public SnapshotObjectStore(Path root) {
+        this(root, DEFAULT_SERVER_NAME);
+    }
+
+    public SnapshotObjectStore(Path root, String serverName) {
+        if (serverName == null || serverName.isBlank()) {
+            throw new IllegalArgumentException("serverName 不能为空（缓存隔离键）");
+        }
         this.root = root;
+        this.serverName = serverName;
     }
 
     public Path root() {
         return this.root;
+    }
+
+    public String serverName() {
+        return this.serverName;
     }
 
     public boolean available() {
@@ -89,11 +105,12 @@ public final class SnapshotObjectStore implements AutoCloseable {
     public void recover() throws IOException {
         this.index.clear();
         this.dimensionEpochs.clear();
-        if (!Files.isDirectory(this.root)) {
+        Path scopedRoot = this.root.resolve(this.serverName);
+        if (!Files.isDirectory(scopedRoot)) {
             this.ready = true; // 空库合法
             return;
         }
-        try (var namespaces = Files.list(this.root)) {
+        try (var namespaces = Files.list(scopedRoot)) {
             for (Path namespace : namespaces.filter(Files::isDirectory).toList()) {
                 try (var paths = Files.list(namespace)) {
                     for (Path path : paths.filter(Files::isDirectory).toList()) {
@@ -363,7 +380,7 @@ public final class SnapshotObjectStore implements AutoCloseable {
     // ---- 内部工具 ----
 
     private Path dimensionDir(DimensionRef dimension) {
-        return this.root.resolve(dimension.namespace()).resolve(dimension.path());
+        return this.root.resolve(this.serverName).resolve(dimension.namespace()).resolve(dimension.path());
     }
 
     private Path chunkDir(ChunkRef key) {

@@ -80,7 +80,7 @@ class ControlServiceIntegrationTest {
                 "127.0.0.1", 0, // 端口 0：随机
                 this.keyStore, "changeit", this.trustStore, "changeit", true,
                 this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
-                "master-1",
+                "master-1", "lobby-1",
                 Map.of("source-server", "SOURCE", "slave-a", "SLAVE", "slave-b", "SLAVE"),
                 16 * 1024 * 1024, 8, 20_000, 40_000,
                 1073742154
@@ -524,7 +524,7 @@ class ControlServiceIntegrationTest {
         // 重启（同一对象库目录）：required/committed 恢复
         ServiceConfig restarted = new ServiceConfig(
                 "127.0.0.1", 0, this.keyStore, "changeit", this.trustStore, "changeit", true,
-                this.config.storeRoot(), this.config.eventLogPath(), 1000, "master-1",
+                this.config.storeRoot(), this.config.eventLogPath(), 1000, "master-1", "lobby-1",
                 Map.of("source-server", "SOURCE", "slave-a", "SLAVE", "slave-b", "SLAVE"),
                 16 * 1024 * 1024, 8, 20_000, 40_000, 1073742154);
         SnapshotObjectStore recovered = new SnapshotObjectStore(restarted.storeRoot());

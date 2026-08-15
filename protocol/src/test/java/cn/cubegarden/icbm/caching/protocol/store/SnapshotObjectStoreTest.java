@@ -223,7 +223,7 @@ class SnapshotObjectStoreTest {
         assertEquals(PutResult.OK, this.put(7, 1, gzipPayload("data-7")));
         this.store.commit(KEY, 7);
         // 人为破坏：committed 高于 required（模拟损坏）
-        Path committedFile = this.root.resolve("minecraft").resolve("overworld")
+        Path committedFile = this.root.resolve("default").resolve("minecraft").resolve("overworld")
                 .resolve("3").resolve("-1").resolve("committed.rev");
         Files.writeString(committedFile, "9");
 
@@ -239,7 +239,7 @@ class SnapshotObjectStoreTest {
         assertEquals(PutResult.OK, this.put(7, 1, gzipPayload("data-7")));
         this.store.commit(KEY, 7);
         // 删除已提交对象文件
-        Path snapshotFile = this.root.resolve("minecraft").resolve("overworld")
+        Path snapshotFile = this.root.resolve("default").resolve("minecraft").resolve("overworld")
                 .resolve("3").resolve("-1").resolve("7").resolve("snapshot.nbt.gz");
         Files.delete(snapshotFile);
 
@@ -266,5 +266,31 @@ class SnapshotObjectStoreTest {
         assertEquals(1, this.store.chunksInRegion(DIM, 0, -1).size());
         assertEquals(1, this.store.chunksInRegion(DIM, 1, -1).size());
         assertEquals(2, this.store.chunksInDimension(DIM).size());
+    }
+
+    @Test
+    void serverNameScopesDataIsolation() throws Exception {
+        // 同一 root 下两个 serverName 的对象库互不可见（缓存隔离键，CACHE_PROTOCOL §1）
+        this.store.raiseRequired(KEY, 7);
+        assertEquals(PutResult.OK, this.put(7, 1, gzipPayload("lobby-1-data")));
+        this.store.commit(KEY, 7);
+        assertEquals(ResolveResult.Status.HIT, this.store.resolve(KEY, 0).status());
+
+        SnapshotObjectStore other = new SnapshotObjectStore(this.root, "lobby-2");
+        other.recover();
+        assertEquals(ResolveResult.Status.MISS, other.resolve(KEY, 0).status());
+        assertNull(other.indexOf(KEY));
+
+        // 目录布局：<root>/<serverName>/<namespace>/<path>/...（setUp 的 store 使用缺省 serverName）
+        assertTrue(Files.isDirectory(this.root.resolve(SnapshotObjectStore.DEFAULT_SERVER_NAME)
+                .resolve("minecraft").resolve("overworld")));
+        assertFalse(Files.exists(this.root.resolve("minecraft").resolve("overworld")));
+        assertFalse(Files.exists(this.root.resolve("lobby-2").resolve("minecraft").resolve("overworld")));
+    }
+
+    @Test
+    void serverNameRejectBlank() {
+        assertThrows(IllegalArgumentException.class, () -> new SnapshotObjectStore(this.root, " "));
+        assertThrows(IllegalArgumentException.class, () -> new SnapshotObjectStore(this.root, null));
     }
 }

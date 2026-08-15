@@ -31,7 +31,7 @@ public final class ControlServiceMain {
         ServiceConfig config = loadConfig(configPath);
         Files.createDirectories(config.storeRoot());
 
-        SnapshotObjectStore store = new SnapshotObjectStore(config.storeRoot());
+        SnapshotObjectStore store = new SnapshotObjectStore(config.storeRoot(), config.serverName());
         store.recover();
         EventLog eventLog = new EventLog(config.eventLogPath(), config.maxEventLogEntries());
         eventLog.recover();

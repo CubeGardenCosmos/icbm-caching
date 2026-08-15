@@ -20,7 +20,11 @@ public final class LocalSnapshotSink implements SnapshotSink {
     private final SnapshotObjectStore store;
 
     public LocalSnapshotSink(Path root) {
-        this.store = new SnapshotObjectStore(root);
+        this(root, SnapshotObjectStore.DEFAULT_SERVER_NAME);
+    }
+
+    public LocalSnapshotSink(Path root, String serverName) {
+        this.store = new SnapshotObjectStore(root, serverName);
         try {
             this.store.recover();
         } catch (IOException e) {
