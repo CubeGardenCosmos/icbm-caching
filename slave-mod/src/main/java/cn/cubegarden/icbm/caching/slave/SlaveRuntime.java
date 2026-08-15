@@ -22,21 +22,23 @@ public final class SlaveRuntime {
     private final SpawnRegistry spawnRegistry;
     private final LoginVerifyGate loginVerifyGate;
     private final PlayerBounds playerBounds;
+    private final String brand;
 
     private SlaveRuntime(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
                          SpawnRegistry spawnRegistry, LoginVerifyGate loginVerifyGate,
-                         PlayerBounds playerBounds) {
+                         PlayerBounds playerBounds, String brand) {
         this.client = client;
         this.chunkLoader = chunkLoader;
         this.spawnRegistry = spawnRegistry;
         this.loginVerifyGate = loginVerifyGate;
         this.playerBounds = playerBounds;
+        this.brand = brand;
     }
 
     public static SlaveRuntime create(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
                                       SpawnRegistry spawnRegistry, LoginVerifyGate loginVerifyGate,
-                                      PlayerBounds playerBounds) {
-        return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds);
+                                      PlayerBounds playerBounds, String brand) {
+        return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds, brand);
     }
 
     public static void install(SlaveRuntime runtime) {
@@ -69,5 +71,10 @@ public final class SlaveRuntime {
 
     public PlayerBounds playerBounds() {
         return this.playerBounds;
+    }
+
+    /** 服务器品牌（F3 Brand，MinecraftServer.getServerModName 覆盖值）。 */
+    public String brand() {
+        return this.brand;
     }
 }

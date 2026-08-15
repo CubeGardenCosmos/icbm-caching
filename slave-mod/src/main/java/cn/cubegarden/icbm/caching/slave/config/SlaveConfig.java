@@ -23,6 +23,9 @@ import org.slf4j.LoggerFactory;
  *   control.dimensions=minecraft:overworld           （订阅维度，逗号分隔）
  *   control.viewDistance=8
  *   control.selfcheck=true
+ *   icbm.brandLocation=HongKong:Kowloon        （可选：服务器品牌地段名，格式「行政区:城市或区域」，
+ *                                              默认空 → brand=ICBM Caching Server；配置后 →
+ *                                              ICBM Caching Server (HongKong:Kowloon)，F3 可见）
  * </pre>
  *
  * <p>配置缺失/无效 → fail closed：控制通道不启动（玩家登录被拒，不服务不确定基线）。
@@ -42,6 +45,7 @@ public final class SlaveConfig {
     private final long readTimeoutMillis;
     private final long reconnectBackoffMillis;
     private final boolean selfcheck;
+    private final String brandLocation;
 
     private SlaveConfig(Builder b) {
         this.masterHost = b.masterHost;
@@ -55,6 +59,7 @@ public final class SlaveConfig {
         this.readTimeoutMillis = b.readTimeoutMillis;
         this.reconnectBackoffMillis = b.reconnectBackoffMillis;
         this.selfcheck = b.selfcheck;
+        this.brandLocation = b.brandLocation;
     }
 
     public static SlaveConfig load(Path worldRoot) {
@@ -83,13 +88,14 @@ public final class SlaveConfig {
         long readTimeout = Long.parseLong(props.getProperty("control.readTimeoutMillis", "30000"));
         long backoff = Long.parseLong(props.getProperty("control.reconnectBackoffMillis", "3000"));
         boolean selfcheck = Boolean.parseBoolean(props.getProperty("control.selfcheck", "true"));
+        String brandLocation = props.getProperty("icbm.brandLocation", "").trim();
         Builder b = new Builder()
                 .masterHost(masterHost).masterPort(Integer.parseInt(masterPort))
                 .psk(psk).uuidHex(uuid).serverName(serverName)
                 .storeRoot(worldRoot.resolve(storeRoot))
                 .dimensions(dimensions).viewDistance(view)
                 .readTimeoutMillis(readTimeout).reconnectBackoffMillis(backoff)
-                .selfcheck(selfcheck);
+                .selfcheck(selfcheck).brandLocation(brandLocation);
         SlaveConfig config = b.build();
         LOGGER.info("[icbm-slave] 配置: master={}:{} serverName={} dims={} storeRoot={} viewDistance={}",
                 config.masterHost(), config.masterPort(), config.serverName(),
@@ -141,6 +147,14 @@ public final class SlaveConfig {
         return this.selfcheck;
     }
 
+    /** 服务器品牌（F3 Brand）：地段名空 → {@code ICBM Caching Server}；
+     *  配置后 → {@code ICBM Caching Server (<地段名>)}，如 (HongKong:Kowloon)。 */
+    public String brand() {
+        return this.brandLocation.isEmpty()
+                ? "ICBM Caching Server"
+                : "ICBM Caching Server (" + this.brandLocation + ")";
+    }
+
     public static final class Builder {
         private String masterHost = "";
         private int masterPort;
@@ -153,6 +167,7 @@ public final class SlaveConfig {
         private long readTimeoutMillis = 30_000;
         private long reconnectBackoffMillis = 3_000;
         private boolean selfcheck = true;
+        private String brandLocation = "";
 
         public Builder masterHost(String v) {
             this.masterHost = v;
@@ -206,6 +221,11 @@ public final class SlaveConfig {
 
         public Builder selfcheck(boolean v) {
             this.selfcheck = v;
+            return this;
+        }
+
+        public Builder brandLocation(String v) {
+            this.brandLocation = v == null ? "" : v.trim();
             return this;
         }
 

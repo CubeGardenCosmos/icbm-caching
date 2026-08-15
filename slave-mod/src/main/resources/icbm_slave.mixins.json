@@ -4,6 +4,7 @@
   "package": "cn.cubegarden.icbm.caching.slave",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "brand.MinecraftServerBrandMixin",
     "network.LoginVerifyGateMixin",
     "network.PlayerBoundsMixin",
     "network.SpectateGateMixin",

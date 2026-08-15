@@ -47,6 +47,8 @@ def write_control_config() -> None:
     print(f"  PSK={psk}（仅本次生成；部署时按运维手册安全分发）")
     print(f"  backendForwardingSecret={backend_secret}（需同步到源服 icbm-control.properties）")
     print(f"  角色绑定: SOURCE={source_uuid} SLAVE={slave_uuid}")
+    print(f"  slave 端 icbm-control.properties 可加 icbm.brandLocation=HongKong:Kowloon（可选，")
+    print(f"    F3 Brand → ICBM Caching Server (HongKong:Kowloon)；默认空不显示地段）")
 
 
 def start_control_service() -> int:

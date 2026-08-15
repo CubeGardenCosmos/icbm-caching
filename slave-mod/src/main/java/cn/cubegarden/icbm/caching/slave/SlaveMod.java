@@ -96,7 +96,8 @@ public final class SlaveMod implements ModInitializer {
                 ModpackFingerprint.compute(server), registryFingerprint);
         LoginVerifyGate loginVerifyGate = new LoginVerifyGate(client, config.serverName());
         PlayerBounds playerBounds = new PlayerBounds(loader);
-        SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds);
+        SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,
+                config.brand());
         SlaveRuntime.install(runtime);
         client.start();
         LOGGER.info("[icbm-slave] 运行时就绪：master={}:{} serverName={} dims={} storeRoot={}",

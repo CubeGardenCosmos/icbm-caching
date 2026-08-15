@@ -24,7 +24,8 @@ public final class MixinTargetVerifier {
                 && checkMethod("net.minecraft.server.level.ChunkMap", "applyStep")
                 && checkClass("net.minecraft.world.level.chunk.storage.SerializableChunkData")
                 && checkMethod("net.minecraft.server.network.ServerLoginPacketListenerImpl", "handleKey")
-                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleMovePlayer");
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleMovePlayer")
+                && checkMethod("net.minecraft.server.MinecraftServer", "getServerModName");
         long maxMemory = Runtime.getRuntime().maxMemory();
         if (maxMemory > 256L * 1024 * 1024) {
             LOGGER.warn("[icbm-slave] 堆上限 {} MiB 超过 256M 设计约束（观测/压测环境可接受）",
