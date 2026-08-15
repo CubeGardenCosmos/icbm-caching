@@ -7,17 +7,22 @@
 
 ## 1. 传输、安全与包络
 
-主控制通道使用独立后台连接（源→master、slave→master 均为 mTLS 长连接），不依赖玩家 Minecraft
-连接。mTLS 证书 CN 绑定角色（`control.roleBindings`），源与 slave 使用独立证书；slave 之间
-不互信（slave 只与 master 对话，slave 证书无法以 SOURCE 角色发送写入消息）。请求大小限制
-（单帧上限可配置，默认 16 MiB；PUT_SNAPSHOT payload 单独上限 64 MiB）、连接速率与审计日志
-由控制服务实施。只有源服对世界操作的最终裁决进入源 Fabric 的主线程；复制、订阅、失效与
-快照均不依赖 Minecraft tick。
+slave↔master 使用**单端口封装通道**（master 只监听一个端口，可被简单转发）：
 
-> 端口规划（待定项，阶段1 修正）：当前为独立 mTLS 受信端口；“打包进 25565 游戏端口”为备选
-> 方向，因安全隔离（控制面与公网玩家入口混流）、流量干扰与审计因素尚未定案；定案后同步
-> 更新 HIERARCHY §6 与本节。玩家流量不经过 master；登录验证材料经受信控制通道递交 master
-> （见 §9），不进入游戏端口。
+- 首字节 magic 匹配进入封装握手；畸形或原版握手立即 **RST**；
+- 鉴权 = 共享公共密码 + 每 slave UUID（明文、可打印日志）；不使用 TLS；
+- 会话加密 = **ChaCha20-Poly1305**（JDK 内置，防篡改/重放）；
+- 承载：登录验证材料 / 身份断言 / 落点与切换指令 / 快照与失效 / 操作提交 /
+  （权威会话时）明文 Minecraft 报文转发；
+- PSK 内网信任边界：知道公共密码者可读取/伪造封装流量（运维手册禁止弱公共密码，
+  UUID 仅身份标签与审计）。
+
+源服↔master 使用 **velocity 授信模式**（modern forwarding secret，内网，master 主动连接），
+不经封装通道；承载快照/失效/epoch/操作终态消息事件（无玩家在线时也可用）。
+
+只有源服对世界操作的最终裁决进入源 Fabric 的主线程；复制、订阅、失效与快照均不依赖
+Minecraft tick。请求大小限制（单帧上限可配置，默认 16 MiB；PUT_SNAPSHOT payload 单独上限
+64 MiB）、连接速率与审计日志由 master 实施。
 
 每条消息使用二进制包络（golden 序列化测试锁定线上字节布局）：
 
@@ -37,7 +42,8 @@
 
 HELLO 包还必须携带：
 
-    role: SOURCE | VIRTUAL_BACKEND | VELOCITY
+    role: SOURCE | SLAVE
+    serverName（velocity.toml 服务器名，源服注册用；缓存隔离键）
     minecraftVersion: 26.3
     runtimeProtocol
     fabricLoaderVersion
@@ -46,10 +52,13 @@ HELLO 包还必须携带：
     registryAndDatapackFingerprint
     capabilities
 
-指纹不一致、证书 CN 绑定角色与 HELLO.role 不一致、版本/runtimeProtocol 不匹配时，控制服务
-拒绝连接（HELLO_ACK accepted=false）与快照复用。slave/虚拟后端的指纹必须与已注册源的指纹一致。
-阶段3 起虚拟后端以 VIRTUAL_BACKEND 角色订阅并维护本地对象库（与 slave 同协议），装载前按
-§6 服务闸门判定（master 连接存活 + committed≥required + epoch 匹配），否则不展示旧区块（fail closed）。
+指纹不一致、角色与鉴权结果不一致、版本/runtimeProtocol 不匹配时，master 拒绝连接
+（HELLO_ACK accepted=false）与快照复用。slave 的指纹必须与已注册源（按 serverName 隔离）的指纹一致。
+slave 以 SLAVE 角色订阅并维护本地对象库，装载前按 §6 服务闸门判定（master 连接存活 +
+committed≥required + epoch 匹配），否则不展示旧区块（fail closed）。
+
+缓存隔离：缓存键含 `serverName`（velocity.toml 服务器名，区分玩家所在世界/维度的隔离依据）与
+`sourceServerId`；不同 serverName 的源服指纹分别注册与校验。
 
 ## 2. 快照消息
 
@@ -236,7 +245,7 @@ master 注销记账（防会话表泄漏）；玩家断开、切换落点、后�
 
 约束：
 
-- 验证请求走 mTLS 受信通道，不经游戏端口；不进入 Minecraft 登录协议本身。
+- 验证请求走封装通道受信流（§1），不经玩家流量；不进入 Minecraft 登录协议本身。
 - master 记账与落点判定的竞态（验证通过→玩家真正进入后端之间）需两阶段确认或持有锁，避免双通过。
 - offline 模式（开发/测试）：master 配置开关，verify=false 时直接放行但仍记账（沿用测试服务器惯例）。
 - 重复会话策略（拒新 / 踢旧）与“源服 + 一个缓存后端同时在线”是否允许，由部署策略定案。

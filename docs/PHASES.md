@@ -20,25 +20,27 @@
 
 ## 阶段 1：架构修正（本次修正）
 
-master 为统筹中心，slave 为 Fabric 模组后端；Auth Gateway 归 master。
+master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端，单端口封装通道，backend 模组管源服。
 
-- [x] 文档重定位：拓扑（玩家→slave→master→后端）、Auth Gateway 归位与会话记账、
+- [x] 文档重定位：拓扑（玩家只能→slave→master→源服）、Auth Gateway 归位与会话记账、
       slave 形态（原生 MC 服务器 + Fabric 模组，不做世界计算）、资源约束（256M JVM、缓存落磁盘）、
-      阶段体系重组（原阶段1 移除，本修正为新阶段1）。
-- [ ] velocity-plugin → master 统筹插件：白名单/fallback 落点判定、多服务器切换、
-      全局活跃会话记账、健康检查、身份断言签发与吊销（master 不作为可直接连接的普通代理）。
+      单端口封装通道（ChaCha20-Poly1305 + 公共密码 + UUID + RST）、源服 velocity 授信模式、
+      serverName 缓存隔离、阶段体系重组（原阶段1 移除，本修正为新阶段1）。
+- [ ] 传输层重写：master 单端口封装通道（magic → 握手[公共密码+UUID] → ChaCha20-Poly1305；
+      畸形/原版握手 RST；多路复用：控制帧 + 明文 MC 报文转发）；golden 测试全更新。
+- [ ] control-service 并入 master（不再独立监听；对象库/事件日志/订阅逻辑成为 master 内部模块）。
+- [ ] backend 模组（fabric-source 演化）：连接层从 mTLS 换成 velocity 授信模式（forwarding secret，
+      内网，master 主动连接）；serverName 注册；数据包缓存；事件集合不变（WORLD_EPOCH/INVALIDATE/
+      PUT_SNAPSHOT/操作终态）。
+- [ ] slave Fabric 模组（新组件 slave-mod/）：原生 MC 服务器进程上接管游戏事件，只实现协议与部分
+      预测，不做世界计算；256M JVM 与磁盘缓存约束落地；封装通道客户端（公共密码+UUID）。
 - [ ] Auth Gateway 归 master：slave 终止登录握手后递验证材料，master 唯一验证 + 记账
       （防同一玩家加入多个 slave），签发 MasterVerifiedIdentity；
       LOGIN_VERIFY 系列消息定义与两侧实现（见 CACHE_PROTOCOL.md §9，协议变更随两侧同一提交）。
-- [ ] slave Fabric 模组（新组件）：原生 MC 服务器进程上接管游戏事件，只实现协议与部分预测，
-      不做世界计算；256M JVM 与磁盘缓存约束落地（按需装载、编码即释放、生成器禁用/替换、
-      独立世界目录禁 save、启动自检 fail closed）。
-- [ ] 控制平面端口规划定案：独立受信端口（现状）vs 打包进 25565 游戏端口（备选，含安全/隔离
-      评估结论），并同步 HIERARCHY §6 与 CACHE_PROTOCOL §1。
 
 验收：
 
-- [ ] master 只被 slave 接入，玩家不能把它当普通代理直接游戏。
+- [ ] 玩家只能经 slave 接入；直接连接 master 的任意流量被 RST；畸形/原版握手被 RST。
 - [ ] 同一玩家无法同时在多个 slave 建立会话（全局会话记账）。
 - [ ] slave 以 256M 堆启动并通过自检（不驻留区块、对象库落盘、静态数据懒加载）。
 - [ ] 文档中的拓扑/职责/约束与实现一致（AGENTS.md 组件归属同步）。
@@ -58,9 +60,11 @@ master 为统筹中心，slave 为 Fabric 模组后端；Auth Gateway 归 master
 ## 阶段 3：master 统筹控制平面
 
 - [ ] master 插件实现落点判定（白名单/fallback）与多服务器切换（fallback、/server、transfer）。
+      （master 单端口封装通道的会话转发：权威会话时 slave 明文 MC 报文 → master → 源服。）
 - [ ] 全局会话记账：验证通过登记、登出/断开注销、竞态两阶段确认、重复会话踢旧/拒新策略。
 - [ ] Auth Gateway 验证流程（LOGIN_VERIFY_REQ/RES）与身份断言签发/单次兑换/吊销。
 - [ ] 健康检查与断路器：后端不可用时落点 fallback，不服务不确定数据。
+- [ ] 源服数据包缓存：权威会话时源服返回的数据包在 master 侧缓存（形成快照供缓存会话）。
 
 验收：
 

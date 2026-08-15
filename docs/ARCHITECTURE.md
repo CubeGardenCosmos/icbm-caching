@@ -1,66 +1,77 @@
 # 开发设计：26.3 Fabric 权威源服、master 统筹中心与 slave Fabric 模组后端
 
-状态：设计基线（阶段1 架构修正：master 统筹 + slave 模组化 + Auth Gateway 归位）
+状态：设计基线（阶段1 架构修正：master 统筹 + 单端口封装通道 + backend/slave 双模组）
 目标版本：Minecraft Java Edition 26.3，单一固定协议
 范围：开发文档，不包含代码实现
 
 ## 1. 架构决策
 
-- 玩家经 **slave** 接入；slave 是运行在原生 Minecraft 服务器上的 **Fabric 模组**，终止客户端
-  登录握手，把验证材料递交给 master 验证。
-- **master（Velocity 统筹中心 + Auth Gateway）** 是唯一信任根与决策中心：Mojang 正版验证、
-  全局会话记账（防同一玩家加入多个 slave）、白名单/fallback 落点判定、多服务器切换、快照聚合、
-  身份断言签发。master 不作为可直接连接的普通代理部署（玩家流量不经过 master）。
-- **源 Fabric 服务器**是唯一权威：唯一能提交世界写入、裁决冲突与发布快照的节点。
+- 玩家**只能连接 slave**；slave 是运行在原生 Minecraft 服务器上的 **Fabric 模组**，终止客户端
+  登录握手，把验证材料经封装通道递交给 master 验证。
+- **master（Velocity 统筹中心 + Auth Gateway + 快照聚合）** 是唯一信任根与决策中心：Mojang 正版
+  验证、全局会话记账（防同一玩家加入多个 slave）、白名单/fallback 落点判定、多服务器切换、
+  快照聚合与身份断言签发。玩家不能直连 master；control-service 并入 master 进程。
+- **源 Fabric 服务器（backend 模组）**是唯一权威：唯一能提交世界写入、裁决冲突与发布快照的节点；
+  工作在内网，使用 velocity 授信模式接入 master；数据包可被缓存（形成快照供缓存会话）。
 - **slave 不做世界计算**：它运行在原生 MC 服务器进程上，但不会真正计算一个 Minecraft 世界；
   它接管游戏内事件，只用服务器基础设施实现：对客户端的 26.3 协议、committed snapshot 装载、
   一部分乐观预测。世界数据来自缓存（快照），不进行 worldgen、tick 模拟或持久化写回。
 - slave 的预测只是乐观结果；源服裁决后以 canonical result 覆盖或回滚（“预测永不信任”不变）。
 
-### 1.1 资源约束（硬约束）
+### 1.1 传输与鉴权（硬约束）
+
+- slave↔master 使用**单端口封装通道**（master 只监听一个端口，可被简单转发）：
+  - 首字节 magic 匹配进入封装握手；畸形或原版握手立即 **RST**；
+  - 鉴权 = 共享公共密码 + 每 slave UUID（明文、可打印日志）；不使用 TLS；
+  - 会话加密 = **ChaCha20-Poly1305**（JDK 内置，防篡改/重放）；
+  - 通道承载：登录验证材料 / 身份断言 / 落点与切换指令 / 快照与失效 / 操作提交 /
+    （权威会话时）明文 Minecraft 报文转发。
+- PSK 内网信任边界：知道公共密码的任何一方可读取/伪造封装流量（运维手册禁止弱公共密码，
+  高强度密码安全分发；UUID 仅身份标签与审计，不提供密码学个体认证）。
+- 源服↔master：**velocity 授信模式**（modern forwarding secret，内网，master 主动连接），
+  不经封装通道；源服游戏端口只接受 master。
+
+### 1.2 资源约束（硬约束）
 
 - slave 以 **256M JVM 堆**的极端条件为设计目标：进程内不驻留完整世界或大量区块对象。
 - **大部分缓存落磁盘**：对象库按区块文件组织（protocol 模块的 `SnapshotObjectStore`），
   内存只保留索引/元数据与极小的热缓存；区块数据按需从磁盘读取、编码即释放。
-- 静态数据（注册表/方块状态表/标签）采用紧凑表示与懒加载，不得全量常驻内存副本
-  （构建期转储资源按需解析）。
+- 静态数据（注册表/方块状态表/标签）采用紧凑表示与懒加载，不得全量常驻内存副本。
 - 预测 overlay 同样遵循：可逆预测以最小增量表示，不做内存中的大结构快照。
+- ChaCha20-Poly1305 与封装层开销小，符合 256M 约束；快照大流量按需流式处理，不整块驻留。
 
 ## 2. 系统边界
 
     玩家
-      │
+      │  （唯一入口：Minecraft 登录协议，slave 终止握手）
       ▼
     slave（Fabric 模组后端：原生 MC 服务器进程，协议 + 快照装载 + 有限预测，不做世界计算）
-      │                         │
-      │验证材料/身份断言        │快照查询（本地磁盘对象库 + ServeGate）
-      ▼                         ▼
-    master 统筹中心（Velocity 插件 + Auth Gateway + 会话记账 + 快照聚合）
-      │                         │
-      │快照/失效/操作终态        │SUBMIT_OPERATION
-      ▼                         ▼
-    源 Fabric 权威模组 ◀─────── 权威世界、游戏规则、冲突裁决
+      │  ▲ 封装通道（单端口：magic + 握手 + ChaCha20-Poly1305；明文 MC 报文 / 控制 / 验证）
+      ▼  │
+    master（Velocity 统筹中心 + Auth Gateway + 会话记账 + 快照聚合；control-service 并入；
+            单端口监听，玩家不能直连）
+      │  ▲ velocity 授信模式（forwarding secret，内网；master 主动连接）
+      ▼  │
+    源服（backend Fabric 模组：唯一权威世界；产生消息事件；数据包可被缓存）
 
 | 组件 | 必须负责 | 不得负责 |
 | --- | --- | --- |
-| 源 Fabric 权威模组 | 脏标记、快照、revision、操作幂等与主线程裁决 | 信任虚拟后端/slave 的预测结果 |
-| master 统筹中心（Velocity） | 快照聚合、required/committed revision、顺序与鉴权、验证/记账/落点判定/切换 | 推断游戏规则；充当普通游戏代理 |
-| slave（Fabric 模组后端） | 与客户端的完整 26.3 后端协议、committed snapshot 装载、预测与回滚、协议状态机 | 世界计算（worldgen/tick 模拟/持久化写回）；最终判定世界写入成功 |
+| 源服 backend 模组（fabric-source） | 脏标记、快照、revision、操作幂等与主线程裁决、消息事件（经 velocity 授信通道） | 信任 slave 的预测结果；面向玩家 |
+| master 统筹中心（velocity-plugin + control-service 并入） | 验证/记账、落点判定/切换、快照聚合、required/committed revision、单端口封装通道、顺序与鉴权 | 推断游戏规则；充当玩家可直连的代理 |
+| slave（slave-mod，原生 MC 服务器） | 与客户端的完整 26.3 后端协议、committed snapshot 装载、预测与回滚、封装通道客户端 | 世界计算（worldgen/tick 模拟/持久化写回）；最终判定世界写入成功 |
 | Auth Gateway（master 内） | 唯一 Mojang 正版验证、全局会话记账、身份断言签发 | 处理游戏会话 |
-| master 缓存目录 | 汇聚源服快照、签发已提交 revision、向 slave 发布 | 裁决世界操作 |
 
-## 3. slave 后端的最低职责（由原“虚拟后端”演进）
+## 3. slave 后端的最低职责
 
-slave 是独立后端服务（原生 MC 服务器进程 + Fabric 模组），不是向 Velocity 内部 pipeline
-写入几个数据包的插件。职责：
+slave 是独立后端服务（原生 MC 服务器进程 + Fabric 模组）。职责：
 
-- 登录后的 configuration 与 play 状态（26.3 最小可用状态机）；
-- registry、数据包和维度元数据同步（构建期转储的 golden 资源，启动指纹校验）；
+- 登录后的 configuration 与 play 状态（26.3 最小可用状态机，vanilla 提供）；
+- registry、数据包和维度元数据同步（vanilla 服务器自身负责；fingerprint 校验确认与源服一致）；
 - compression、keepalive 与断线清理；
 - 玩家位置、传送确认和 chunk loading window；
-- Chunk Data and Update Light、Block Entity Data、Update Light 的编码（由 committed snapshot
-  按需编码，内存即时释放）；
-- Respawn、Set Center Chunk、Unload Chunk 的客户端视图语义；
+- 区块数据由 committed snapshot 装载（快照 NBT → LevelChunk 注入），未命中/落后/epoch 不匹配
+  → fail closed 不展示旧区块，绝不本地生成“幽灵区块”；
+- Respawn、Set Center Chunk、Unload Chunk 的客户端视图语义（vanilla 提供）；
 - 玩家交互 sequence、Acknowledge Block Change 和状态纠正（预测/回滚路径）。
 
 首版不实现游戏模拟。它只提供旁观者可见的地形、光照与方块实体快照，拒绝所有写入
@@ -70,16 +81,23 @@ slave 是独立后端服务（原生 MC 服务器进程 + Fabric 模组），不
 
 slave 运行原生 MC 服务器进程，但：
 
-- 不 worldgen：区块只从 committed snapshot 装载；未命中/落后/epoch 不匹配 → 不展示旧区块
-  （fail closed），绝不本地生成“幽灵区块”；
+- 不 worldgen：区块只从 committed snapshot 装载；
 - 不 tick 模拟世界：不跑方块/液体/随机刻/实体模拟（预测操作按白名单以最小模拟实现）；
 - 不持久化：独立世界目录、禁 save；无任何到源服世界的写通道；
-- 256M 约束：见 §1.1。
+- 256M 约束：见 §1.2。
+
+### 3.2 权威会话与源服数据包缓存
+
+- 缓存会话（默认）：数据面在 slave，玩家流量不经过 master。
+- 权威会话（玩家需要源服实时权威数据）：slave 把明文 Minecraft 报文经封装通道交给 master，
+  master 以 velocity 授信模式转发到源服；源服返回的数据包在 master 侧缓存（形成快照，
+  供后续缓存会话使用）。这是“源服务器数据包可被缓存”的落点。
 
 ## 4. 快照、缓存键与一致性
 
 ### 4.1 缓存键
 
+    serverName（velocity.toml 服务器名，区分世界/维度的缓存隔离依据）
     sourceServerId
     worldEpoch
     dimensionId
@@ -108,11 +126,11 @@ Anvil 的 .mca 是磁盘 region 格式，不等于客户端 Chunk Data and Updat
 
 ### 4.3 提交顺序
 
-1. 源 Fabric 模组在当前 tick 将可能变化的区块标为 dirty。
+1. 源服 backend 模组在当前 tick 将可能变化的区块标为 dirty。
 2. tick 末尾合并同一区块的修改，产生更高 revision 和稳定快照。
-3. 控制服务先记录 requiredRevision，使旧快照不可读。
+3. master 先记录 requiredRevision，使旧快照不可读。
 4. 快照经哈希、大小和 epoch 校验后持久化。
-5. 控制服务原子设置 committedRevision。
+5. master 原子设置 committedRevision。
 6. slave 只以 matching epoch 的 committed snapshot 作为基线。
 
 因此，在源服已知区块变化而新快照尚未到达时，slave 宁可冻结该区块或要求完整重同步，
@@ -121,9 +139,9 @@ Anvil 的 .mca 是磁盘 region 格式，不等于客户端 Chunk Data and Updat
 ### 4.4 磁盘缓存策略（256M 约束）
 
 - 对象库按区块文件落在磁盘（`SnapshotObjectStore`）；slave 启动时扫描重建索引（仅元数据入内存）。
-- 区块装载：按需读取对象 → 解压解析 → 编码客户端包 → 发送后立即释放；内存不驻留区块。
+- 区块装载：按需读取对象 → 解压解析 → 注入 LevelChunk → 发送后立即释放；内存不驻留区块。
 - 已编码结果不做内存缓存（或极小 LRU）；revision 变化即失效。
-- 静态转储资源：懒加载 + 紧凑内存表示（如 block state 表按需解析索引）。
+- 静态转储资源：懒加载 + 紧凑内存表示。
 
 ## 5. 乐观方块操作
 
@@ -149,8 +167,8 @@ preconditions 至少包含目标方块的状态哈希；有方块实体时也包
 
 1. slave 接收客户端交互，并对尚未支持的类型直接拒绝。
 2. 对支持的类型，slave 只在可丢弃 overlay 中应用可逆预测；不得改写 committed snapshot。
-3. slave 异步发送 SUBMIT_OPERATION。
-4. 源 Fabric 模组以 operationId 去重，把操作放到源服主线程。
+3. slave 经封装通道异步发送 SUBMIT_OPERATION。
+4. 源服 backend 模组以 operationId 去重，把操作放到源服主线程。
 5. 源服重新检查玩家身份、权限、距离、背包、冷却、方块状态、方块实体和游戏规则，并在权威世界
    中执行或等价模拟该操作。
 6. 成功时源服发送 OPERATION_COMMITTED，包含唯一的 canonical delta、玩家状态变化和 revision 集合。
@@ -189,7 +207,7 @@ Acknowledge Block Change 仅使客户端在给定 sequence 后采用服务端方
 为控制回滚复杂度，首版每名玩家每个区块只允许一个 pending operation；相交的操作排队直到
 前一个操作达到终态。
 
-## 7. Fabric 源端
+## 7. Fabric 源端（backend）
 
 Fabric API 的 ServerChunkEvents 适合 chunk 加载、卸载和资源清理，但不代表所有内容变化。
 玩家挖掘事件同样不能覆盖活塞、随机刻、命令、世界生成、其他模组或方块实体原地修改。
@@ -200,17 +218,18 @@ Fabric API 的 ServerChunkEvents 适合 chunk 加载、卸载和资源清理，�
 2. 使用 Mixin 钩住 26.3 的权威服务端方块修改、chunk 脏标记和 block entity 脏标记路径。
 
 Mixin 的精确目标必须以 26.3 mappings 和实际字节码验证。任何目标缺失都要在启动时禁用缓存命中，
-而不是静默降级。源服需保存每 chunk revision（阶段1 已实现并验证）。
+而不是静默降级。源服需保存每 chunk revision（原阶段1 已实现并验证）。
 
 ## 8. 后台控制协议
 
 “特殊协议字段”应定义为版本化的 ICBM 控制消息字段，而不是在标准 vanilla 游戏包中插入未知字段。
-主数据流使用独立的认证后台连接（mTLS，独立受信端口；端口规划待定项见 CACHE_PROTOCOL.md §1）。
-登录验证材料（server hash/shared secret/Profile）经受信控制通道递交给 master 的 Auth Gateway，
-不进入游戏端口。
 
-Fabric Custom Payload 仅适用于附着在玩家连接上的 client/server 模组消息。没有玩家在线时，
-它不能作为源服到 slave 的可靠复制总线；可用于可选能力协商，但不能承载快照和写入提交的主数据流。
+- slave↔master：单端口封装通道（ChaCha20-Poly1305 + 公共密码 + UUID），承载控制帧与
+  （权威会话时）明文 MC 报文；不依赖玩家 Minecraft 连接。
+- 源服↔master：velocity 授信模式（内网受信长连接，forwarding secret 鉴权），承载快照/失效/
+  epoch/操作终态消息事件；无玩家在线时也可用（独立于玩家会话连接）。
+- Fabric Custom Payload 仅用于玩家会话内可选能力协商（独占命名空间、版本化 codec、大小限制），
+  不承担后台 snapshot/invalidate/operation 主通道。
 
 ## 9. 26.3 兼容性约束
 
@@ -219,7 +238,8 @@ Fabric Custom Payload 仅适用于附着在玩家连接上的 client/server 模�
 
 逻辑上，chunk 初始状态包含高度图、section、方块实体和光照；section 使用 palette 与 packed
 long array 编码 block states 和 biomes。具体 bits-per-entry、字段顺序和数组长度随版本、注册表
-和数据包变化。slave 只针对单一固定 26.3 组合编码协议。
+和数据包变化。slave 只针对单一固定 26.3 组合编码协议（区块由 vanilla 网络层编码，快照 NBT
+以 26.3 SerializableChunkData 解析注入）。
 
 ## 10. 风险与防线
 
@@ -231,8 +251,10 @@ long array 编码 block states 和 biomes。具体 bits-per-entry、字段顺序
 | Mixin 漏报 dirty | 先失效后提交；覆盖玩家、刻、命令、模组修改的测试 |
 | 26.3 版本漂移 | fingerprint、启动自检、golden snapshot 和协议测试 |
 | 控制服务不可用 | fail closed：停止使用新缓存基线，不服务不确定数据 |
+| 封装通道被暴力破解/弱密码 | 运维手册禁止弱公共密码；RST 拒绝畸形连接；审计日志 |
 | slave 内存超限（256M） | 磁盘对象库 + 按需装载 + 编码即释放 + 启动自检（堆占用上限检查） |
 | slave 误 worldgen/持久化 | 生成器禁用/替换、独立世界目录禁 save、Mixin 启动自检 fail closed |
+| 源服数据包缓存未验证 | 只有 committed+epoch 匹配的快照可作基线；未验证数据包不入缓存 |
 
 ## 11. 参考资料
 
@@ -241,9 +263,12 @@ long array 编码 block states 和 biomes。具体 bits-per-entry、字段顺序
   https://docs.papermc.io/velocity/dev/event-api/
   https://docs.papermc.io/velocity/dev/scheduler-api/
   https://docs.papermc.io/velocity/dev/plugin-messaging/
+- Velocity player information forwarding
+  https://docs.papermc.io/velocity/player-information-forwarding/
 - Fabric API lifecycle 与 networking
   https://github.com/FabricMC/fabric-api/tree/26.2/fabric-lifecycle-events-v1
   https://github.com/FabricMC/fabric-api/tree/26.2/fabric-networking-api-v1
 - Minecraft 网络区块格式与数据包
   https://minecraft.wiki/w/Java_Edition_protocol/Chunk_format
   https://minecraft.wiki/w/Java_Edition_protocol/Packets
+- JDK ChaCha20-Poly1305：`javax.crypto.Cipher.getInstance("ChaCha20-Poly1305")`
