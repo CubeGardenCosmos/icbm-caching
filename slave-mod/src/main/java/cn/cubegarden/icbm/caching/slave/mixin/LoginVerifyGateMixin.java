@@ -61,6 +61,10 @@ public abstract class LoginVerifyGateMixin {
     @Unique
     private UUID icbm_slave$clientProfileId = UUID.randomUUID();
 
+    /** 验证通过后的真实 UUID（accept 时记录；登录阶段断开上报 SESSION_CLOSED 用）。 */
+    @Unique
+    private UUID icbm_slave$verifiedUuid = null;
+
     @Inject(method = "handleHello", at = @At("HEAD"), cancellable = true)
     private void icbm_slave$requestChallenge(ServerboundHelloPacket packet, CallbackInfo ci) {
         this.requestedUsername = packet.name();
@@ -118,6 +122,25 @@ public abstract class LoginVerifyGateMixin {
         ci.cancel();
     }
 
+    /** 登录阶段断开（验证通过后、进入游戏前被踢/客户端取消）：上报 SESSION_CLOSED，
+     *  防 master 会话泄漏 → 后续重试被误判 DUPLICATE_SESSION（正常玩家反复登录操作）。
+     *  进入游戏后连接监听器已切换为 play，不会走到这里（play 断开由 ServerPlayConnectionEvents 上报）。 */
+    @Inject(method = "onDisconnect", at = @At("HEAD"))
+    private void icbm_slave$reportLoginDisconnect(net.minecraft.network.DisconnectionDetails details,
+                                                  CallbackInfo ci) {
+        UUID verified = this.icbm_slave$verifiedUuid;
+        if (verified == null) {
+            return;
+        }
+        SlaveRuntime runtime = SlaveRuntime.current();
+        if (runtime != null) {
+            runtime.loginVerifyGate().onPlayerDisconnect(
+                    this.requestedUsername == null ? "?" : this.requestedUsername, verified,
+                    "login-disconnect:" + (details == null || details.reason() == null ? "?" : details.reason().getString()));
+        }
+        this.icbm_slave$verifiedUuid = null;
+    }
+
     @Unique
     private void icbm_slave$accept(Messages.LoginKeyRes res) {
         try {
@@ -134,6 +157,7 @@ public abstract class LoginVerifyGateMixin {
             GameProfile profile = cn.cubegarden.icbm.caching.slave.network.LoginProfileBuilder
                     .build(uuid, this.requestedUsername, identity.profileProperties());
             this.startClientVerification(profile); // 官方流程继续（VERIFYING → 配置阶段）
+            this.icbm_slave$verifiedUuid = uuid; // 登录阶段断开上报 SESSION_CLOSED 用
             LOGGER.info("[icbm-slave] 登录验证通过: {} session={}", profile.name(), identity.sessionId());
             SlaveRuntime runtime = SlaveRuntime.current();
             if (runtime != null) {

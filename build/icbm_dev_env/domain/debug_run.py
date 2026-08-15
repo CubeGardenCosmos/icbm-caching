@@ -244,6 +244,7 @@ def _write_source_config(identity: dict[str, str]) -> None:
         f"rcon.port=25579\n"
         f"rcon.password={secrets.token_hex(8)}\n"
         "pause-when-empty-seconds=0\n"  # 无玩家也持续 tick（脏标记 → 快照发布依赖 Server thread）
+        "white-list=false\n"  # 白名单权威在 master 后端（源服）；26.3 默认 true 是坑，显式关闭
         # 正常地形生成器（debug 要求）：level-type 仅对新世界生效（26.3
         # DedicatedServerProperties.java:141），故 _reset_state 先清世界；固定 seed 可复现
         f"level-type=minecraft:normal\n"
@@ -286,6 +287,7 @@ def _write_slave_config(identity: dict[str, str]) -> None:
         f"rcon.port={RCON_PORT}\n"
         f"rcon.password={secrets.token_hex(8)}\n"
         "pause-when-empty-seconds=0\n"  # 缓存服务器必须持续 tick（快照/区块刷新依赖）
+        "white-list=false\n"  # slave 不设白名单（白名单权威 = master 后端源服）；26.3 默认 true
     )
     (slave / "server.properties").write_text(slave_props)
     world = slave / "world"

@@ -67,6 +67,7 @@ def _ensure_test_config() -> None:
         "view-distance=4\n"
         "simulation-distance=4\n"
         "enable-command-block=true\n"
+        "white-list=false\n"  # 26.3 默认 true；测试流程用 RCON 无玩家，显式关闭防误拒
     )
 
 

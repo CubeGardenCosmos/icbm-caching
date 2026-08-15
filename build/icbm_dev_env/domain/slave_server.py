@@ -81,6 +81,8 @@ def deploy() -> None:
         # 缓存服务器必须持续 tick（快照应用/区块刷新依赖 Server thread；26.3 空服默认
         # 60s 暂停 → tick 停止 → 卸载队列不处理 → 区块刷新卡住，里程碑 7 e2e 暴露）
         "pause-when-empty-seconds=0\n"
+        # slave 不设白名单（白名单权威 = master 后端源服）；26.3 white-list 默认 true 是坑
+        "white-list=false\n"
     )
     print(f"slave 服务器就绪: {SLAVE_SERVER}（端口 25598，RCON 25580，offline-mode 测试用）")
 
