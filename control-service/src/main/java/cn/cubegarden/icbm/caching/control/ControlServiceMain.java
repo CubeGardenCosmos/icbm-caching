@@ -2,6 +2,8 @@ package cn.cubegarden.icbm.caching.control;
 
 import cn.cubegarden.icbm.caching.control.config.ServiceConfig;
 import cn.cubegarden.icbm.caching.control.net.ControlServer;
+import cn.cubegarden.icbm.caching.control.net.EncapsulatedControlServer;
+import cn.cubegarden.icbm.caching.control.net.EncapsulatedControlSession;
 import cn.cubegarden.icbm.caching.control.net.PeerRegistry;
 import cn.cubegarden.icbm.caching.control.replication.EventLog;
 import cn.cubegarden.icbm.caching.control.replication.Replicator;
@@ -39,8 +41,23 @@ public final class ControlServiceMain {
         Replicator replicator = new Replicator(store, eventLog, config);
         ControlService service = new ControlService(store, eventLog, replicator, registry, config);
         ControlServer server = new ControlServer(config, service, replicator, registry);
+        EncapsulatedControlServer encapsulated = null;
+        if (!config.psk().isEmpty() && config.encapsulatedPort() > 0) {
+            encapsulated = new EncapsulatedControlServer(config, service, replicator, registry,
+                    new EncapsulatedControlSession.Listener() {
+                    });
+            encapsulated.start();
+        } else {
+            LOGGER.warn("[control] 封装通道未启用（需配置 control.psk 与 control.encapsulatedPort）");
+        }
+        EncapsulatedControlServer encapsulatedRef = encapsulated;
 
-        Runtime.getRuntime().addShutdownHook(new Thread(server::stop));
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            server.stop();
+            if (encapsulatedRef != null) {
+                encapsulatedRef.close();
+            }
+        }));
         server.start();
         LOGGER.info("[control] 就绪：对象库={} events={} peerBindings={}",
                 config.storeRoot(), config.eventLogPath(), config.roleBindings().keySet());

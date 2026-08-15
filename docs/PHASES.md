@@ -26,8 +26,9 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
       slave 形态（原生 MC 服务器 + Fabric 模组，不做世界计算）、资源约束（256M JVM、缓存落磁盘）、
       单端口封装通道（ChaCha20-Poly1305 + 公共密码 + UUID + RST）、源服 velocity 授信模式、
       serverName 缓存隔离、阶段体系重组（原阶段1 移除，本修正为新阶段1）。
-- [ ] 传输层重写：master 单端口封装通道（magic → 握手[公共密码+UUID] → ChaCha20-Poly1305；
-      畸形/原版握手 RST；多路复用：控制帧 + 明文 MC 报文转发）；golden 测试全更新。
+- [x] 传输层重写：master 单端口封装通道（magic → 握手[公共密码+UUID] → ChaCha20-Poly1305；
+      畸形/原版握手 RST；多路复用：控制帧 + 明文 MC 报文转发）；golden 测试全更新
+      （EncapsulatedControlServer 已实现；MC_PASSTHROUGH 转发随阶段5 权威会话桥）。
 - [ ] control-service 并入 master（不再独立监听；对象库/事件日志/订阅逻辑成为 master 内部模块）。
 - [ ] backend 模组（fabric-source 演化）：连接层从 mTLS 换成 velocity 授信模式（forwarding secret，
       内网，master 主动连接）；serverName 注册；数据包缓存；事件集合不变（WORLD_EPOCH/INVALIDATE/
@@ -36,7 +37,7 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
       预测，不做世界计算；256M JVM 与磁盘缓存约束落地；封装通道客户端（公共密码+UUID）。
 - [ ] Auth Gateway 归 master：slave 终止登录握手后递验证材料，master 唯一验证 + 记账
       （防同一玩家加入多个 slave），签发 MasterVerifiedIdentity；
-      LOGIN_VERIFY 系列消息定义与两侧实现（见 CACHE_PROTOCOL.md §9，协议变更随两侧同一提交）。
+      LOGIN_VERIFY 系列消息定义已落地（CACHE_PROTOCOL §9），验证流程实现随阶段3/5。
 
 验收：
 

@@ -30,7 +30,12 @@
 - [x] 新消息：LOGIN_VERIFY_REQ/RES、SESSION_CLOSED（CACHE_PROTOCOL §9）+ codec + golden 测试。
 - [x] 缓存键扩展：serverName 进入（对象库目录结构按 serverName 分域
       `<root>/<serverName>/<namespace>/<path>/...`，隔离测试锁定）。
-- [ ] 验收：旧消息不回归（现有组件测试通过）；golden 字节锁定；畸形帧/非 magic 连接 RST 测试。
+- [x] master 封装服务（control-service）：单端口封装通道监听（首字节 magic 判别 → 非 magic
+      RST SO_LINGER=0 → AUTH 握手 → HKDF 派生 → ChaCha20-Poly1305 多路复用），控制帧复用
+      ControlSessionLogic（与 mTLS 会话同一套 HELLO/序号/权限/分发逻辑）；LOGIN_VERIFY/
+      MC_PASSTHROUGH 流留回调（阶段3/5）。
+- [x] 验收：旧消息不回归（现有组件测试通过）；golden 字节锁定（AUTH/帧/HKDF 向量）；
+      畸形帧/非 magic 连接 RST 测试（协议层 + 服务器层 EncapsulatedControlServerTest）。
 
 ## 里程碑 2：control-service 并入 master
 

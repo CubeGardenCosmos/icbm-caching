@@ -26,7 +26,9 @@ public record ServiceConfig(
         int maxEventLogEntries,
         String serverId,
         String serverName,
-        Map<String, String> roleBindings, // cert CN -> role 名
+        String psk,
+        int encapsulatedPort,
+        Map<String, String> roleBindings, // bindingId(cert CN / UUID) -> role 名
         int maxFrameBytes,
         int pushWindow,
         long heartbeatIntervalMillis,
@@ -39,7 +41,7 @@ public record ServiceConfig(
                 "0.0.0.0", 11420,
                 null, "", null, "", false,
                 root.resolve("objects"), root.resolve("events.log"), 100_000,
-                "master-1", "default",
+                "master-1", "default", "", 0,
                 new LinkedHashMap<>(), 16 * 1024 * 1024,
                 64, 30_000, 90_000,
                 1_073_742_154 // 26.3-snapshot-8 runtime protocol（docs/VERSION_FREEZE.md）
@@ -84,6 +86,8 @@ public record ServiceConfig(
                 Integer.parseInt(props.getProperty("control.maxEventLogEntries", Integer.toString(d.maxEventLogEntries()))),
                 props.getProperty("control.serverId", d.serverId()),
                 props.getProperty("control.serverName", d.serverName()),
+                props.getProperty("control.psk", d.psk()),
+                Integer.parseInt(props.getProperty("control.encapsulatedPort", Integer.toString(d.encapsulatedPort()))),
                 bindings,
                 Integer.parseInt(props.getProperty("control.maxFrameBytes", Integer.toString(d.maxFrameBytes()))),
                 Integer.parseInt(props.getProperty("control.pushWindow", Integer.toString(d.pushWindow()))),
