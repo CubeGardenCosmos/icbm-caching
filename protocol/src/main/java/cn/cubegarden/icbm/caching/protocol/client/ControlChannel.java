@@ -55,9 +55,10 @@ public class ControlChannel implements AutoCloseable {
         }
     }
 
-    /** 握手参数（26.3 冻结值与指纹，来自调用方）。 */
+    /** 握手参数（26.3 冻结值与指纹，来自调用方；serverName 为缓存隔离键）。 */
     public record HelloConfig(
             Role role,
+            String serverName,
             String minecraftVersion,
             int runtimeProtocol,
             String fabricLoaderVersion,
@@ -182,6 +183,7 @@ public class ControlChannel implements AutoCloseable {
     private void sendHandshake() throws IOException {
         byte[] body = encode(MessageType.HELLO, new Messages.Hello(
                 this.helloConfig.role(),
+                this.helloConfig.serverName(),
                 this.helloConfig.minecraftVersion(),
                 this.helloConfig.runtimeProtocol(),
                 this.helloConfig.fabricLoaderVersion(),

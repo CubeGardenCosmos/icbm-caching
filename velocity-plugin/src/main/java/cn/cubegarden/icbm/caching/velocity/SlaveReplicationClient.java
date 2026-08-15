@@ -20,7 +20,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * slave 复制客户端（HIERARCHY.md §5，阶段2 控制平面；Velocity 路由接线为阶段4）：
- * 连接 master → HELLO（VELOCITY 角色 + 源指纹）→ SUBSCRIBE（ackedSequence）→
+ * 连接 master → HELLO（SLAVE 角色 + 源指纹）→ SUBSCRIBE（ackedSequence）→
  * 接收 WORLD_EPOCH/INVALIDATE/SNAPSHOT_PUSH 并应用到本地对象库 → ACK 推进流控窗口。
  *
  * <p>一致性：
@@ -67,7 +67,7 @@ public final class SlaveReplicationClient implements AutoCloseable {
         this.subscribed = Set.copyOf(Arrays.asList(dimensions));
         this.ackBatchSize = Math.max(1, ackBatchSize);
         this.channel = new ControlChannel(host, port, slaveServerId,
-                new ControlChannel.HelloConfig(Role.VELOCITY, minecraftVersion, runtimeProtocol,
+                new ControlChannel.HelloConfig(Role.SLAVE, slaveServerId, minecraftVersion, runtimeProtocol,
                         fabricLoaderVersion, fabricApiVersion, modpackFingerprint,
                         registryAndDatapackFingerprint, (byte) 0),
                 sslContext, readTimeoutMillis, reconnectBackoffMillis, true, new ChannelListener());

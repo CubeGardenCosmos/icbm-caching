@@ -9,9 +9,10 @@ public final class Messages {
     private Messages() {
     }
 
-    /** HELLO（角色、版本、指纹与能力）。 */
+    /** HELLO（角色、serverName、版本、指纹与能力；serverName 为缓存隔离键，见 CACHE_PROTOCOL §1）。 */
     public record Hello(
             Role role,
+            String serverName,
             String minecraftVersion,
             int runtimeProtocol,
             String fabricLoaderVersion,
@@ -135,5 +136,44 @@ public final class Messages {
 
     /** ERROR：协议违规时由接收方发出并关闭通道。 */
     public record ErrorMessage(String reason) {
+    }
+
+    /** Mojang 正版 profile 属性（LOGIN_VERIFY_REQ.profileProperties 一项）。 */
+    public record ProfileProperty(String name, String value, String signature) {
+    }
+
+    /** LOGIN_VERIFY_REQ：slave 终止登录握手后把验证材料经封装通道递交给 master（CACHE_PROTOCOL §9）。 */
+    public record LoginVerifyReq(
+            String playerName,
+            byte[] playerUuid,
+            ProfileProperty[] profileProperties,
+            String serverHash,
+            byte[] sharedSecret,
+            String slaveId,
+            String connectionInfo,
+            byte[] nonce,
+            long sentAt
+    ) {
+    }
+
+    /** master 签发的身份断言（LOGIN_VERIFY_RES.VERIFIED 载荷；HIERARCHY §2）。 */
+    public record MasterVerifiedIdentity(
+            String issuer,
+            String keyId,
+            String audience,
+            byte[] playerUuid,
+            String sessionId,
+            byte[] nonce,
+            long expiresAt,
+            byte[] signature
+    ) {
+    }
+
+    /** LOGIN_VERIFY_RES：验证结果（VERIFIED 含断言；REJECTED 含 reason）。 */
+    public record LoginVerifyRes(boolean verified, String reason, MasterVerifiedIdentity identity) {
+    }
+
+    /** SESSION_CLOSED：slave 上报会话关闭，master 注销记账（防会话表泄漏）。 */
+    public record SessionClosed(byte[] playerUuid, String sessionId, String reason) {
     }
 }

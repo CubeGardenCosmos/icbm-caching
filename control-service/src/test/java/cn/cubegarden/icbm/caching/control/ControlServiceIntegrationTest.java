@@ -81,7 +81,7 @@ class ControlServiceIntegrationTest {
                 this.keyStore, "changeit", this.trustStore, "changeit", true,
                 this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
                 "master-1",
-                Map.of("source-server", "SOURCE", "slave-a", "VELOCITY", "slave-b", "VELOCITY"),
+                Map.of("source-server", "SOURCE", "slave-a", "SLAVE", "slave-b", "SLAVE"),
                 16 * 1024 * 1024, 8, 20_000, 40_000,
                 1073742154
         );
@@ -140,7 +140,7 @@ class ControlServiceIntegrationTest {
         TestClient(String id, Role role, String fingerprint, String registryFingerprint,
                    int port, SSLContext ssl, int runtimeProtocol, String minecraftVersion) {
             this.channel = new ControlChannel("127.0.0.1", port, id,
-                    new ControlChannel.HelloConfig(role, minecraftVersion, runtimeProtocol, "0.19.3",
+                    new ControlChannel.HelloConfig(role, id, minecraftVersion, runtimeProtocol, "0.19.3",
                             "0.157.1+26.3", fingerprint, registryFingerprint, (byte) 0),
                     ssl, 5000, 100, false, new ControlChannel.Listener() {
                         @Override
@@ -272,7 +272,7 @@ class ControlServiceIntegrationTest {
     void invalidateToCommitWindowNeverReturnsOldHit() throws Exception {
         try (TestClient source = new TestClient(SOURCE_ID, Role.SOURCE, FINGERPRINT, REGISTRY_FINGERPRINT,
                 serverPort(), sourceSsl());
-             TestClient slave = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+             TestClient slave = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                      serverPort(), slaveSsl())) {
             source.awaitConnected();
             slave.awaitConnected();
@@ -309,7 +309,7 @@ class ControlServiceIntegrationTest {
     void corruptedSnapshotRejectedAndRequiredStaysRaised() throws Exception {
         try (TestClient source = new TestClient(SOURCE_ID, Role.SOURCE, FINGERPRINT, REGISTRY_FINGERPRINT,
                 serverPort(), sourceSsl());
-             TestClient slave = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+             TestClient slave = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                      serverPort(), slaveSsl())) {
             source.awaitConnected();
             slave.awaitConnected();
@@ -383,9 +383,9 @@ class ControlServiceIntegrationTest {
         // 多个 slave（slave-a/slave-b 独立证书）都能连接受信 master，但不能冒充 SOURCE
         try (TestClient source = new TestClient(SOURCE_ID, Role.SOURCE, FINGERPRINT, REGISTRY_FINGERPRINT,
                 serverPort(), sourceSsl());
-             TestClient slaveA = new TestClient("slave-a", Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+             TestClient slaveA = new TestClient("slave-a", Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                      serverPort(), clientSsl("tls/slave-a.p12"));
-             TestClient slaveB = new TestClient("slave-b", Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+             TestClient slaveB = new TestClient("slave-b", Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                      serverPort(), clientSsl("tls/slave-b.p12"))) {
             source.awaitConnected();
             slaveA.awaitConnected();
@@ -403,7 +403,7 @@ class ControlServiceIntegrationTest {
 
     @Test
     void fingerprintMismatchSlaveRejected() throws Exception {
-        try (TestClient slave = new TestClient(SLAVE_A, Role.VELOCITY, "different-modpack",
+        try (TestClient slave = new TestClient(SLAVE_A, Role.SLAVE, "different-modpack",
                 REGISTRY_FINGERPRINT, serverPort(), slaveSsl())) {
             assertTrue(slave.handshakeDone.await(5, TimeUnit.SECONDS), "握手必须被拒绝");
             assertTrue(slave.events.stream().anyMatch(e -> e.startsWith("rejected:")),
@@ -413,7 +413,7 @@ class ControlServiceIntegrationTest {
 
     @Test
     void wrongRuntimeProtocolRejected() throws Exception {
-        try (TestClient bad = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+        try (TestClient bad = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                 serverPort(), slaveSsl(), 999)) {
             assertTrue(bad.handshakeDone.await(5, TimeUnit.SECONDS), "握手必须被拒绝");
             assertTrue(bad.events.stream().anyMatch(e -> e.startsWith("rejected:")),
@@ -429,7 +429,7 @@ class ControlServiceIntegrationTest {
                 serverPort(), sourceSsl(), 1073742154, "26.3 Snapshot 8")) {
             source.awaitConnected();
         }
-        try (TestClient bad = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+        try (TestClient bad = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                 serverPort(), slaveSsl(), 1073742154, "26.2 Snapshot 3")) {
             assertTrue(bad.handshakeDone.await(5, TimeUnit.SECONDS), "握手必须被拒绝");
             assertTrue(bad.events.stream().anyMatch(e -> e.startsWith("rejected:")),
@@ -444,7 +444,7 @@ class ControlServiceIntegrationTest {
             source.awaitConnected();
 
             // 第一个 slave 订阅并接收推送
-            try (TestClient slave1 = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+            try (TestClient slave1 = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                     serverPort(), slaveSsl())) {
                 slave1.awaitConnected();
                 slave1.send(MessageType.SUBSCRIBE, slave1.nextRequestId(),
@@ -471,7 +471,7 @@ class ControlServiceIntegrationTest {
             }
 
             // 断线重连的 slave：ackedSequence=0 → 重放全部事件（补发）
-            try (TestClient slave2 = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+            try (TestClient slave2 = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                     serverPort(), slaveSsl())) {
                 slave2.awaitConnected();
                 slave2.send(MessageType.SUBSCRIBE, slave2.nextRequestId(),
@@ -483,7 +483,7 @@ class ControlServiceIntegrationTest {
 
             // 断线重连且已 ack：不再重放
             long lastSeq = this.eventLog.lastSequence();
-            try (TestClient slave3 = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+            try (TestClient slave3 = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                     serverPort(), slaveSsl())) {
                 slave3.awaitConnected();
                 slave3.send(MessageType.SUBSCRIBE, slave3.nextRequestId(),
@@ -499,7 +499,7 @@ class ControlServiceIntegrationTest {
     void resolveUnavailableWhenServiceShuttingDown() throws Exception {
         try (TestClient source = new TestClient(SOURCE_ID, Role.SOURCE, FINGERPRINT, REGISTRY_FINGERPRINT,
                 serverPort(), sourceSsl());
-             TestClient slave = new TestClient(SLAVE_A, Role.VELOCITY, FINGERPRINT, REGISTRY_FINGERPRINT,
+             TestClient slave = new TestClient(SLAVE_A, Role.SLAVE, FINGERPRINT, REGISTRY_FINGERPRINT,
                      serverPort(), slaveSsl())) {
             source.awaitConnected();
             slave.awaitConnected();
@@ -525,7 +525,7 @@ class ControlServiceIntegrationTest {
         ServiceConfig restarted = new ServiceConfig(
                 "127.0.0.1", 0, this.keyStore, "changeit", this.trustStore, "changeit", true,
                 this.config.storeRoot(), this.config.eventLogPath(), 1000, "master-1",
-                Map.of("source-server", "SOURCE", "slave-a", "VELOCITY", "slave-b", "VELOCITY"),
+                Map.of("source-server", "SOURCE", "slave-a", "SLAVE", "slave-b", "SLAVE"),
                 16 * 1024 * 1024, 8, 20_000, 40_000, 1073742154);
         SnapshotObjectStore recovered = new SnapshotObjectStore(restarted.storeRoot());
         recovered.recover();

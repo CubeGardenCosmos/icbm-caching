@@ -37,7 +37,7 @@ class RemoteSnapshotSinkTest {
 
     private RemoteSnapshotSink sink(int port, List<String> events) {
         RemoteSnapshotSink sink = new RemoteSnapshotSink(
-                "127.0.0.1", port, "test-source", "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
+                "127.0.0.1", port, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
                 "modpack-hash", "registry-hash", null, 5000, 100);
         return sink;
     }

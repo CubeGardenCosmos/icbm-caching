@@ -18,7 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 虚拟后端控制平面客户端（CACHE_PROTOCOL.md，阶段2 消息复用）：以 VIRTUAL_BACKEND 角色
+ * 虚拟后端控制平面客户端（CACHE_PROTOCOL.md，阶段2 消息复用）：以 SLAVE 角色
  * 连接 master → HELLO（源指纹）→ SUBSCRIBE（ackedSequence）→ 接收 WORLD_EPOCH /
  * INVALIDATE / SNAPSHOT_PUSH 应用到本地对象库 → ACK 推进流控窗口。
  *
@@ -62,7 +62,7 @@ public final class ReplicationClient implements AutoCloseable {
         this.subscribed = Set.copyOf(Arrays.asList(dimensions));
         this.ackBatchSize = Math.max(1, ackBatchSize);
         this.channel = new ControlChannel(host, port, serverId,
-                new ControlChannel.HelloConfig(Role.VIRTUAL_BACKEND, minecraftVersion, runtimeProtocol,
+                new ControlChannel.HelloConfig(Role.SLAVE, serverId, minecraftVersion, runtimeProtocol,
                         fabricLoaderVersion, fabricApiVersion, modpackFingerprint,
                         registryAndDatapackFingerprint, (byte) 0),
                 sslContext, readTimeoutMillis, reconnectBackoffMillis, true, new ChannelListener());

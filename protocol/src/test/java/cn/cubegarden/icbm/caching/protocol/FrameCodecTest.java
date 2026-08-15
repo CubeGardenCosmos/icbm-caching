@@ -54,20 +54,26 @@ class FrameCodecTest {
     @Test
     void helloBodyGoldenBytes() throws IOException {
         Messages.Hello hello = new Messages.Hello(
-                Role.SOURCE, "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
+                Role.SOURCE, "lobby-1", "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
                 "modpack-hash", "registry-hash", (byte) 0
         );
         byte[] body = encodeBody(MessageType.HELLO, hello);
-        // role SOURCE(0) + "26.3" + protocol int + "0.19.3" + "0.157.1+26.3" + modpack + registry + capabilities
+        // role SOURCE(0) + serverName "lobby-1"(7) + "26.3" + protocol int + ... + capabilities
         assertEquals(0, body[0]);
+        // serverName: 长度 7 + "lobby-1"
         assertEquals(0, body[1]);
-        assertEquals(4, body[2]);
-        assertEquals('2', body[3]);
-        // protocol int (1073742154 = 0x4000014A)
-        assertEquals(0x40, body[7] & 0xFF);
-        assertEquals(0x00, body[8] & 0xFF);
-        assertEquals(0x01, body[9] & 0xFF);
-        assertEquals(0x4A, body[10] & 0xFF);
+        assertEquals(7, body[2]);
+        assertEquals('l', body[3]);
+        assertEquals('1', body[9]);
+        // "26.3": 长度 4 + '2' 在 body[10..11]
+        assertEquals(0, body[10]);
+        assertEquals(4, body[11]);
+        assertEquals('2', body[12]);
+        // protocol int (1073742154 = 0x4000014A) 位于 "26.3" 之后
+        assertEquals(0x40, body[16] & 0xFF);
+        assertEquals(0x00, body[17] & 0xFF);
+        assertEquals(0x01, body[18] & 0xFF);
+        assertEquals(0x4A, body[19] & 0xFF);
 
         Messages.Hello decoded = MessageBodyCodec.decode(MessageType.HELLO,
                 new DataInputStream(new ByteArrayInputStream(body)));
@@ -80,7 +86,7 @@ class FrameCodecTest {
         byte[] payload = {9, 8, 7};
 
         Object[] samples = new Object[] {
-                new Messages.Hello(Role.VELOCITY, "26.3", 1073742154, "0.19.3", "0.157.1+26.3", "m", "r", (byte) 1),
+                new Messages.Hello(Role.SLAVE, "slave-a", "26.3", 1073742154, "0.19.3", "0.157.1+26.3", "m", "r", (byte) 1),
                 new Messages.HelloAck(true, "", "master-1"),
                 new Messages.WorldEpoch(dim, 3, EpochReason.ROLLBACK, "reg"),
                 new Messages.Invalidate(dim, 3, -1, 7, InvalidateReason.BLOCK_STATE),
@@ -95,7 +101,15 @@ class FrameCodecTest {
                 new Messages.ResyncRes(dim, 5, 7, 2),
                 new Messages.Heartbeat(1_700_000_000_000L, 10),
                 new Messages.AdminInvalidate(dim, "REGION", 0, 0, 1, 1, "admin test"),
-                new Messages.ErrorMessage("bad frame")
+                new Messages.ErrorMessage("bad frame"),
+                new Messages.LoginVerifyReq("Steve", new byte[16],
+                        new Messages.ProfileProperty[] {new Messages.ProfileProperty("textures", "v", "sig")},
+                        "serverHash", new byte[16], "slave-a", "127.0.0.1:50000", new byte[16], 1_700_000_000_000L),
+                new Messages.LoginVerifyRes(true, "", new Messages.MasterVerifiedIdentity(
+                        "master", "key-1", "slave-a", new byte[16], "sess-1", new byte[16],
+                        1_700_000_100_000L, new byte[] {1, 2, 3})),
+                new Messages.LoginVerifyRes(false, "验证失败", null),
+                new Messages.SessionClosed(new byte[16], "sess-1", "disconnect")
         };
         MessageType[] types = new MessageType[] {
                 MessageType.HELLO, MessageType.HELLO_ACK, MessageType.WORLD_EPOCH,
@@ -103,7 +117,8 @@ class FrameCodecTest {
                 MessageType.RESOLVE_CHUNK_REQ, MessageType.RESOLVE_CHUNK_RES, MessageType.SUBSCRIBE,
                 MessageType.SNAPSHOT_PUSH, MessageType.ACK, MessageType.RESYNC_REQ,
                 MessageType.RESYNC_RES, MessageType.HEARTBEAT, MessageType.ADMIN_INVALIDATE,
-                MessageType.ERROR
+                MessageType.ERROR, MessageType.LOGIN_VERIFY_REQ, MessageType.LOGIN_VERIFY_RES,
+                MessageType.LOGIN_VERIFY_RES, MessageType.SESSION_CLOSED
         };
         for (int i = 0; i < samples.length; i++) {
             byte[] body = encodeBody(types[i], samples[i]);
@@ -145,6 +160,45 @@ class FrameCodecTest {
             assertEquals(e.pushEnabled(), a.pushEnabled());
             assertEquals(e.ackedSequence(), a.ackedSequence());
             assertArrayEquals(e.dimensions(), a.dimensions());
+            return;
+        }
+        if (expected instanceof Messages.LoginVerifyReq e && actual instanceof Messages.LoginVerifyReq a) {
+            assertEquals(e.playerName(), a.playerName());
+            assertArrayEquals(e.playerUuid(), a.playerUuid());
+            assertEquals(e.profileProperties().length, a.profileProperties().length);
+            for (int i = 0; i < e.profileProperties().length; i++) {
+                assertEquals(e.profileProperties()[i], a.profileProperties()[i]);
+            }
+            assertEquals(e.serverHash(), a.serverHash());
+            assertArrayEquals(e.sharedSecret(), a.sharedSecret());
+            assertEquals(e.slaveId(), a.slaveId());
+            assertEquals(e.connectionInfo(), a.connectionInfo());
+            assertArrayEquals(e.nonce(), a.nonce());
+            assertEquals(e.sentAt(), a.sentAt());
+            return;
+        }
+        if (expected instanceof Messages.LoginVerifyRes e && actual instanceof Messages.LoginVerifyRes a) {
+            assertEquals(e.verified(), a.verified());
+            assertEquals(e.reason(), a.reason());
+            if (e.identity() == null) {
+                assertTrue(a.identity() == null);
+            } else {
+                assertTrue(a.identity() != null, "identity 缺失");
+                assertEquals(e.identity().issuer(), a.identity().issuer());
+                assertEquals(e.identity().keyId(), a.identity().keyId());
+                assertEquals(e.identity().audience(), a.identity().audience());
+                assertArrayEquals(e.identity().playerUuid(), a.identity().playerUuid());
+                assertEquals(e.identity().sessionId(), a.identity().sessionId());
+                assertArrayEquals(e.identity().nonce(), a.identity().nonce());
+                assertEquals(e.identity().expiresAt(), a.identity().expiresAt());
+                assertArrayEquals(e.identity().signature(), a.identity().signature());
+            }
+            return;
+        }
+        if (expected instanceof Messages.SessionClosed e && actual instanceof Messages.SessionClosed a) {
+            assertArrayEquals(e.playerUuid(), a.playerUuid());
+            assertEquals(e.sessionId(), a.sessionId());
+            assertEquals(e.reason(), a.reason());
             return;
         }
         assertEquals(expected, actual, "round-trip " + type);

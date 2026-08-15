@@ -21,7 +21,10 @@ public enum MessageType {
     RESYNC_RES(0x0D),
     HEARTBEAT(0x0E),
     ADMIN_INVALIDATE(0x0F),
-    ERROR(0x10);
+    ERROR(0x10),
+    LOGIN_VERIFY_REQ(0x11),
+    LOGIN_VERIFY_RES(0x12),
+    SESSION_CLOSED(0x13);
 
     private final byte id;
 

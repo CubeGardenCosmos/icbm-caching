@@ -48,7 +48,7 @@ class ControlChannelTest {
     }
 
     private ControlChannel.HelloConfig helloConfig() {
-        return new ControlChannel.HelloConfig(Role.SOURCE, "26.3", 1073742154, "0.19.3",
+        return new ControlChannel.HelloConfig(Role.SOURCE, "lobby-1", "26.3", 1073742154, "0.19.3",
                 "0.157.1+26.3", "modpack-hash", "registry-hash", (byte) 0);
     }
 
@@ -80,6 +80,7 @@ class ControlChannelTest {
                 assertEquals(MessageType.HELLO, hello.messageType());
                 Messages.Hello helloBody = ControlChannel.decode(MessageType.HELLO, hello.body());
                 assertEquals(Role.SOURCE, helloBody.role());
+                assertEquals("lobby-1", helloBody.serverName());
                 assertEquals("26.3", helloBody.minecraftVersion());
                 writeFrame(hs.out(), Envelope.of(MessageType.HELLO_ACK, hello.requestId(), "master-1",
                         0, 1, System.currentTimeMillis(), ControlChannel.encode(

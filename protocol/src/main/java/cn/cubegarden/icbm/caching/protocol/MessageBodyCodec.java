@@ -37,6 +37,7 @@ public final class MessageBodyCodec {
             @Override
             public void encode(DataOutput out, Messages.Hello value) throws IOException {
                 out.writeByte(value.role().id());
+                writeString(out, value.serverName());
                 writeString(out, value.minecraftVersion());
                 out.writeInt(value.runtimeProtocol());
                 writeString(out, value.fabricLoaderVersion());
@@ -52,6 +53,7 @@ public final class MessageBodyCodec {
                 if (role == null) {
                     throw new IOException("unknown role");
                 }
+                String serverName = readString(in);
                 String mcVersion = readString(in);
                 int protocol = in.readInt();
                 String loader = readString(in);
@@ -59,7 +61,7 @@ public final class MessageBodyCodec {
                 String modpack = readString(in);
                 String registry = readString(in);
                 byte capabilities = in.readByte();
-                return new Messages.Hello(role, mcVersion, protocol, loader, api, modpack, registry, capabilities);
+                return new Messages.Hello(role, serverName, mcVersion, protocol, loader, api, modpack, registry, capabilities);
             }
         });
         register(MessageType.HELLO_ACK, new Codec<Messages.HelloAck>() {
@@ -300,6 +302,94 @@ public final class MessageBodyCodec {
                 return new Messages.ErrorMessage(readString(in));
             }
         });
+        register(MessageType.LOGIN_VERIFY_REQ, new Codec<Messages.LoginVerifyReq>() {
+            @Override
+            public void encode(DataOutput out, Messages.LoginVerifyReq value) throws IOException {
+                writeString(out, value.playerName());
+                writeUuid(out, value.playerUuid());
+                out.writeShort(value.profileProperties().length);
+                for (Messages.ProfileProperty property : value.profileProperties()) {
+                    writeString(out, property.name());
+                    writeString(out, property.value());
+                    writeString(out, property.signature());
+                }
+                writeString(out, value.serverHash());
+                writeUuid(out, value.sharedSecret());
+                writeString(out, value.slaveId());
+                writeString(out, value.connectionInfo());
+                writeUuid(out, value.nonce());
+                out.writeLong(value.sentAt());
+            }
+
+            @Override
+            public Messages.LoginVerifyReq decode(DataInput in) throws IOException {
+                String playerName = readString(in);
+                byte[] playerUuid = readUuid(in);
+                int count = in.readUnsignedShort();
+                Messages.ProfileProperty[] properties = new Messages.ProfileProperty[count];
+                for (int i = 0; i < count; i++) {
+                    properties[i] = new Messages.ProfileProperty(readString(in), readString(in), readString(in));
+                }
+                String serverHash = readString(in);
+                byte[] sharedSecret = readUuid(in);
+                String slaveId = readString(in);
+                String connectionInfo = readString(in);
+                byte[] nonce = readUuid(in);
+                long sentAt = in.readLong();
+                return new Messages.LoginVerifyReq(
+                        playerName, playerUuid, properties, serverHash, sharedSecret,
+                        slaveId, connectionInfo, nonce, sentAt
+                );
+            }
+        });
+        register(MessageType.LOGIN_VERIFY_RES, new Codec<Messages.LoginVerifyRes>() {
+            @Override
+            public void encode(DataOutput out, Messages.LoginVerifyRes value) throws IOException {
+                out.writeBoolean(value.verified());
+                writeString(out, value.reason());
+                if (value.verified()) {
+                    Messages.MasterVerifiedIdentity id = value.identity();
+                    if (id == null) {
+                        throw new IOException("VERIFIED 必须携带 identity");
+                    }
+                    writeString(out, id.issuer());
+                    writeString(out, id.keyId());
+                    writeString(out, id.audience());
+                    writeUuid(out, id.playerUuid());
+                    writeString(out, id.sessionId());
+                    writeUuid(out, id.nonce());
+                    out.writeLong(id.expiresAt());
+                    writeBytes(out, id.signature());
+                }
+            }
+
+            @Override
+            public Messages.LoginVerifyRes decode(DataInput in) throws IOException {
+                boolean verified = in.readBoolean();
+                String reason = readString(in);
+                Messages.MasterVerifiedIdentity identity = null;
+                if (verified) {
+                    identity = new Messages.MasterVerifiedIdentity(
+                            readString(in), readString(in), readString(in),
+                            readUuid(in), readString(in), readUuid(in), in.readLong(), readBytes(in)
+                    );
+                }
+                return new Messages.LoginVerifyRes(verified, reason, identity);
+            }
+        });
+        register(MessageType.SESSION_CLOSED, new Codec<Messages.SessionClosed>() {
+            @Override
+            public void encode(DataOutput out, Messages.SessionClosed value) throws IOException {
+                writeUuid(out, value.playerUuid());
+                writeString(out, value.sessionId());
+                writeString(out, value.reason());
+            }
+
+            @Override
+            public Messages.SessionClosed decode(DataInput in) throws IOException {
+                return new Messages.SessionClosed(readUuid(in), readString(in), readString(in));
+            }
+        });
     }
 
     private static Codec<Messages.PutSnapshot> snapshotCodec() {
@@ -388,6 +478,36 @@ public final class MessageBodyCodec {
         byte[] bytes = new byte[length];
         in.readFully(bytes);
         return ProtocolConstants.utf8(bytes);
+    }
+
+    /** 16 字节定长 UUID 二进制（与 Java UUID 的字节序约定一致，两字节序均为定长 16 字节）。 */
+    public static void writeUuid(DataOutput out, byte[] uuid) throws IOException {
+        if (uuid == null || uuid.length != 16) {
+            throw new IOException("uuid 必须为 16 字节: " + (uuid == null ? "null" : uuid.length));
+        }
+        out.write(uuid);
+    }
+
+    public static byte[] readUuid(DataInput in) throws IOException {
+        byte[] uuid = new byte[16];
+        in.readFully(uuid);
+        return uuid;
+    }
+
+    /** 2 字节长度前缀 + 原始字节（签名等二进制字段）。 */
+    public static void writeBytes(DataOutput out, byte[] value) throws IOException {
+        if (value == null || value.length > ProtocolConstants.MAX_STRING_BYTES) {
+            throw new IOException("bytes 长度越界: " + (value == null ? "null" : value.length));
+        }
+        out.writeShort(value.length);
+        out.write(value);
+    }
+
+    public static byte[] readBytes(DataInput in) throws IOException {
+        int length = in.readUnsignedShort();
+        byte[] bytes = new byte[length];
+        in.readFully(bytes);
+        return bytes;
     }
 
     /** 校验 body 内容是否为空（防止 null body 进入编解码）。 */

@@ -152,6 +152,11 @@ public final class IcbmSource implements ModInitializer {
         int port = Integer.parseInt(props.getProperty("icbm.control.port", "11420"));
         String sourceServerId = props.getProperty("icbm.control.sourceServerId",
                 "source-" + UUID.randomUUID().toString().substring(0, 8));
+        // serverName：velocity.toml 服务器名（缓存隔离键，CACHE_PROTOCOL §1）；缺省退回 sourceServerId
+        String serverName = props.getProperty("icbm.control.serverName", sourceServerId).trim();
+        if (serverName.isEmpty()) {
+            serverName = sourceServerId;
+        }
         Path keyStore = resolve(server, props.getProperty("icbm.control.keystore", ""));
         String keyStorePassword = props.getProperty("icbm.control.keystorePassword", "");
         Path trustStore = resolve(server, props.getProperty("icbm.control.truststore", ""));
@@ -160,7 +165,7 @@ public final class IcbmSource implements ModInitializer {
             SSLContext ssl = tlsContext(keyStore, keyStorePassword, trustStore, trustStorePassword);
             String registryFingerprint = registryFingerprint(server);
             RemoteSnapshotSink sink = new RemoteSnapshotSink(
-                    host, port, sourceServerId,
+                    host, port, sourceServerId, serverName,
                     net.minecraft.SharedConstants.getCurrentVersion().name(),
                     net.minecraft.SharedConstants.getProtocolVersion(),
                     net.fabricmc.loader.api.FabricLoader.getInstance()

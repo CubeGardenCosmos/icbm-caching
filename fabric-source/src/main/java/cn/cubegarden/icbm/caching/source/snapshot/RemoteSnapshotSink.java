@@ -60,6 +60,7 @@ public final class RemoteSnapshotSink implements SnapshotSink {
             String host,
             int port,
             String sourceServerId,
+            String serverName,
             String minecraftVersion,
             int runtimeProtocol,
             String fabricLoaderVersion,
@@ -71,7 +72,7 @@ public final class RemoteSnapshotSink implements SnapshotSink {
             long reconnectBackoffMillis
     ) {
         this.channel = new ControlChannel(host, port, sourceServerId,
-                new ControlChannel.HelloConfig(Role.SOURCE, minecraftVersion, runtimeProtocol,
+                new ControlChannel.HelloConfig(Role.SOURCE, serverName, minecraftVersion, runtimeProtocol,
                         fabricLoaderVersion, fabricApiVersion, modpackFingerprint,
                         registryAndDatapackFingerprint, (byte) 0),
                 sslContext, readTimeoutMillis, reconnectBackoffMillis, true, new ChannelListener());

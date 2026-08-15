@@ -1,5 +1,6 @@
 package cn.cubegarden.icbm.caching.control.config;
 
+import cn.cubegarden.icbm.caching.protocol.Role;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -55,7 +56,18 @@ public record ServiceConfig(
                 if (kv.length != 2) {
                     throw new IllegalArgumentException("control.roleBindings 格式错误: " + pair);
                 }
-                bindings.put(kv[0].trim(), kv[1].trim());
+                String roleName = kv[1].trim();
+                boolean known = false;
+                for (Role role : Role.values()) {
+                    if (role.name().equals(roleName)) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (!known) {
+                    throw new IllegalArgumentException("control.roleBindings 未知角色: " + roleName);
+                }
+                bindings.put(kv[0].trim(), roleName);
             }
         }
         return new ServiceConfig(

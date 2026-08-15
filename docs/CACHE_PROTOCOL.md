@@ -1,7 +1,8 @@
 # ICBM 控制协议
 
-状态：实现 v3（阶段2 后台控制协议落地；草稿 `build/workspace/draft/phase2-control-protocol`）；
-     阶段1 架构修正新增 §9 登录验证草案（未实现，随两侧同一提交落地）
+状态：实现 v4（阶段1 架构修正：角色重定义为 SOURCE/SLAVE、HELLO 增加 serverName、
+     LOGIN_VERIFY_REQ/RES 与 SESSION_CLOSED 落地，随两侧同一提交；草稿
+     `build/workspace/draft/encapsulated-channel`）；封装通道传输层见 §1
 参与方：源 Fabric 权威模组、master（统筹中心 + Auth Gateway + 缓存目录）、slave（Fabric 模组后端）
 非目标：替代客户端与 Minecraft 后端之间的标准 26.3 游戏协议
 
@@ -216,30 +217,35 @@ slave 只在满足以下全部条件时把本地对象作为虚拟后端基线�
 控制服务校验 HELLO.minecraftVersion 为 26.3 系列（前缀匹配，完整版本名如 “26.3 Snapshot 8”
 与快照 id 均接受）；精确版本由 runtimeProtocol 锁定（1073742154）。
 
-## 9. 登录验证与会话记账（阶段1 修正草案，未实现）
+## 9. 登录验证与会话记账（阶段1 已实现）
 
 背景：Auth Gateway 归 master（HIERARCHY §2/§3）。slave 终止 Minecraft 登录握手（RSA 密钥在
 slave），把验证材料经受信控制通道递交给 master；master 是唯一执行 Mojang 正版验证的组件，
 验证通过后登记全局活跃会话表（同一玩家 UUID 同时只允许一个会话，防玩家加入多个 slave）并签发
 身份断言。
 
-草案消息（消息 type 与字段在实现时冻结并做 golden 测试；按 AGENTS.md 约定，新增消息 type 必须
-在同一个提交中更新本文档与两侧实现）：
+消息 type 与字段已冻结并做 golden 测试（LOGIN_VERIFY_REQ=0x11 / LOGIN_VERIFY_RES=0x12 /
+SESSION_CLOSED=0x13；按 AGENTS.md 约定，新增消息 type 已在同一提交中更新本文档与两侧实现）：
 
 ### LOGIN_VERIFY_REQ（slave → master）
 
-    playerName / playerUuid / profileProperties
-    serverHash / sharedSecret（加密材料，供 master 调用 session server 验证）
-    slaveId / connectionInfo / nonce / sentAt
+    playerName(2+utf8) / playerUuid(16) / profileProperties(count(2) + 每项 name(2+utf8) +
+      value(2+utf8) + signature(2+utf8))
+    serverHash(2+utf8) / sharedSecret(16)（加密材料，供 master 调用 session server 验证）
+    slaveId(2+utf8) / connectionInfo(2+utf8) / nonce(16) / sentAt(8)
 
 ### LOGIN_VERIFY_RES（master → slave）
 
-    VERIFIED（含 MasterVerifiedIdentity 断言：issuer/keyId/audience/expiresAt/sessionId/nonce/signature）
-    | REJECTED（reason：验证失败 / DUPLICATE_SESSION（已存在于其它 slave）/ 黑名单 / 吊销）
+    verified(1) + reason(2+utf8)
+    verified=true 时附 MasterVerifiedIdentity 断言：
+      issuer(2+utf8) / keyId(2+utf8) / audience(2+utf8) / playerUuid(16) /
+      sessionId(2+utf8) / nonce(16) / expiresAt(8) / signature(2+bytes)
+    verified=false 时 reason 为拒绝原因：验证失败 / DUPLICATE_SESSION（已存在于其它 slave）/
+      黑名单 / 吊销
 
 ### SESSION_CLOSED（slave → master）
 
-    playerUuid / sessionId / reason
+    playerUuid(16) / sessionId(2+utf8) / reason(2+utf8)
 
 master 注销记账（防会话表泄漏）；玩家断开、切换落点、后端故障均需上报。
 

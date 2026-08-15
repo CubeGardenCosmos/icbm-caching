@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 /**
  * 虚拟后端（阶段3）：独立 26.3 旁观者后端服务。
  *
- * <p>接线：游戏监听（netty）+ 控制平面（mTLS VIRTUAL_BACKEND 角色订阅/推送）+ 本地对象库
+ * <p>接线：游戏监听（netty）+ 控制平面（mTLS SLAVE 角色订阅/推送）+ 本地对象库
  * （ServeGate 语义 fail closed）+ 转储注册表（manifest 指纹校验）。
  *
  * <p>验收映射：
