@@ -10,8 +10,11 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.DoublePlantBlock;
 import net.minecraft.world.level.block.GameMasterBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
@@ -118,6 +121,14 @@ public final class OperationAdjudicator implements cn.cubegarden.icbm.caching.so
                 }
                 if (!authority.isAir() && !authority.canBeReplaced()) {
                     return new Rejected("target-not-replaceable");
+                }
+                // 复杂放置拒绝（阶段 8.1；与 slave 预检验同判定）：块实体（容器/告示牌等，
+                // setBlock 会建空 BE 且无 setPlacedBy 副作用）与双格结构（DoublePlantBlock/
+                // DoorBlock/BedBlock，setBlock 只放半格）→ 拒绝，权威世界不得产生畸形方块。
+                Block placedBlock = placed.getBlock();
+                if (placed.hasBlockEntity() || placedBlock instanceof DoublePlantBlock
+                        || placedBlock instanceof DoorBlock || placedBlock instanceof BedBlock) {
+                    return new Rejected("complex-placement-block");
                 }
                 if (!level.setBlock(pos, placed, Block.UPDATE_CLIENTS)) {
                     return new Rejected("set-block-failed");

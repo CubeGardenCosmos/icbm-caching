@@ -82,6 +82,17 @@ public final class OperationOverlay {
         return false;
     }
 
+    /** 某 chunk 的全部未决操作（阶段 8.1：刷新/重载后重应用预测——LevelChunk = committed + overlay）。 */
+    public synchronized List<Pending> pendingInChunk(int chunkX, int chunkZ) {
+        List<Pending> found = new ArrayList<>();
+        for (Pending pending : this.pendingByOp.values()) {
+            if (pending.chunkX == chunkX && pending.chunkZ == chunkZ) {
+                found.add(pending);
+            }
+        }
+        return found;
+    }
+
     /** 提交时登记预测（调用方已校验可预测性与单 pending 约束）。 */
     public synchronized void submit(String operationIdHex, String playerIdHex,
                                     Messages.SubmitOperation op, String predictedState) {

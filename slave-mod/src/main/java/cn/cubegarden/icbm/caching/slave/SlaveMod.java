@@ -108,14 +108,19 @@ public final class SlaveMod implements ModInitializer {
                 ModpackFingerprint.compute(server), registryFingerprint);
         LoginVerifyGate loginVerifyGate = new LoginVerifyGate(client, config.serverName());
         PlayerBounds playerBounds = new PlayerBounds(loader);
-        // 乐观操作（里程碑 7 阶段 5）：可丢弃 overlay + 终态回调（COMMITTED 清预测/REJECTED 清预测
-        // 并落回 committed snapshot；源服拒绝即世界未变，显示旧状态即与源一致）
+        // 乐观操作（里程碑 7 阶段 5 + 阶段 8.1 真实玩家接线）：可丢弃 overlay + 终态回调
+        // （COMMITTED 清预测等快照覆盖 / REJECTED RESYNC 落回 committed snapshot 并重应用
+        // 其余 pending 预测；源服拒绝即世界未变，显示旧状态即与源一致）
         cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay =
                 new cn.cubegarden.icbm.caching.slave.operation.OperationOverlay();
-        client.setOperationListener(new OperationTerminalHandler(overlay, client));
-        // 快照刷新：乐观操作 COMMITTED 后新快照展示给玩家视角（已装载区块卸载→重载→Mixin 注入）
+        // 快照刷新/操作终态：乐观操作 COMMITTED 后新快照展示给玩家视角；REJECTED 后 RESYNC
+        // 落回 committed snapshot（玩家在 chunk 内走就地刷新，避免卸载卡住 10s 延迟）
         cn.cubegarden.icbm.caching.slave.world.SnapshotReloader reloader =
-                new cn.cubegarden.icbm.caching.slave.world.SnapshotReloader(loader);
+                new cn.cubegarden.icbm.caching.slave.world.SnapshotReloader(loader, overlay);
+        cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler operationHandler =
+                new cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler(
+                        client, overlay, loader, reloader);
+        client.setOperationListener(operationHandler);
         client.setSnapshotReloader(reloader);
         client.setServerRef(server);
         // A8：断线 → 丢弃全部 overlay 预测（fail closed；重连后 master 重订阅补齐，世界以快照为准）
@@ -132,7 +137,7 @@ public final class SlaveMod implements ModInitializer {
                 new cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay(client, config.uuidHex());
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(debugOverlay::onServerTick);
         SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,
-                overlay, config.brand(), debugOverlay);
+                overlay, operationHandler, config.brand(), debugOverlay);
         SlaveRuntime.install(runtime);
         client.start();
         // 初始同步闸门：装载 spawn 区块前等基线（WORLD_EPOCH/快照）；超时不阻断（fail closed）
@@ -172,53 +177,5 @@ public final class SlaveMod implements ModInitializer {
         }
         SlaveRuntime.clear();
         LOGGER.info("[icbm-slave] 已停止");
-    }
-
-    /** 操作终态处理：COMMITTED → 清预测（真实快照随后覆盖）；REJECTED → 清预测（世界未变，
-     *  落回 committed snapshot 即与源一致）；STATUS_RES → 按终态处理（UNKNOWN → 保守丢弃
-     *  全部预测，fail closed）。 */
-    private static final class OperationTerminalHandler
-            implements cn.cubegarden.icbm.caching.slave.control.SlaveControlClient.OperationListener {
-
-        private final cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay;
-        private final SlaveControlClient client;
-
-        OperationTerminalHandler(cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay,
-                                 SlaveControlClient client) {
-            this.overlay = overlay;
-            this.client = client;
-        }
-
-        @Override
-        public void onCommitted(Messages.OperationCommitted committed) {
-            this.overlay.onCommitted(committed.operationId());
-            LOGGER.info("[icbm-slave] 操作已提交: op={} state={} rev={}",
-                    java.util.HexFormat.of().formatHex(committed.operationId()),
-                    committed.canonicalState(), committed.chunkRevision());
-        }
-
-        @Override
-        public void onRejected(Messages.OperationRejected rejected) {
-            this.overlay.onRejected(rejected.operationId());
-            LOGGER.warn("[icbm-slave] 操作被拒（预测已清除，落回 committed snapshot）: op={} reason={}",
-                    java.util.HexFormat.of().formatHex(rejected.operationId()), rejected.reason());
-        }
-
-        @Override
-        public void onStatusRes(Messages.OperationStatusRes res) {
-            String id = java.util.HexFormat.of().formatHex(res.operationId());
-            switch (res.status()) {
-                case COMMITTED -> this.overlay.onCommitted(res.operationId());
-                case REJECTED -> this.overlay.onRejected(res.operationId());
-                case UNKNOWN, PENDING -> {
-                    if (res.status() == Messages.OperationStatusRes.OperationStatus.UNKNOWN) {
-                        // 源服丢失终态（重启/历史裁剪）：保守丢弃全部预测，fail closed
-                        int dropped = this.overlay.discardAll();
-                        LOGGER.error("[icbm-slave] 操作终态未知（源服历史丢失）: op={} 丢弃全部预测 {} 项", id, dropped);
-                    }
-                }
-            }
-        }
-
     }
 }

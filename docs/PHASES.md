@@ -56,29 +56,40 @@
    REJECTED_HASH_MISMATCH（e2e-slave.log 实测），多数区块 required/committed 无法 bootstrap →
    玩家被困在单个快照区块内。
 
-### 8.1 真实玩家操作接线（修复"方块不可破坏"）
+### 8.1 真实玩家操作接线（修复"方块不可破坏"）——已完成
 
-- [ ] 草稿 `draft/real-player-operations/` 三步流程：参考仓库（fabric-source/velocity 互动包处理与
-      既有操作管道）、官方（ServerGamePacketListenerImpl.handlePlayerAction/handleUseItemOn、
-      ServerPlayerGameMode.handleBlockBreakAction/destroyBlock、BlockItem.place；26.3 字段/动作名
-      必须来自 minecraft-assets）、差异取舍（slave 不做世界计算 → 只取客户端意图 + 预测，
-      源服主线程裁决核心不变）。
-- [ ] SpectateGate 改造：handlePlayerAction 的 START/STOP_DESTROY_BLOCK（创造模式 instant break）
-      与 handleUseItemOn（PLACE）→ 放行至操作管道；预检验（目标区块可服务、overlay 单 pending、
-      类型白名单 BREAK/PLACE、目标非空气/可替换）；其余互动（使用物品/交互实体/丢弃/换手等）
-      保持拒绝。
-- [ ] 预测可见性：overlay 预测经**已装载 LevelChunk 内存态应用**（setBlockState flags=UPDATE_CLIENTS
-      → vanilla 推送 ClientboundBlockUpdatePacket 给玩家视角）；不写对象库/不落盘（SaveGate 已禁
-      持久化）；REJECTED/刷新时以 committed 快照重载恢复（可丢弃语义不变）。草稿确认 26.3
-      block update 推送路径与 flags 语义（Level.java setBlock 对照）。
-- [ ] 真实玩家上下文提交：SUBMIT_OPERATION 携带真实 playerId/virtualSessionId/clientInteractionSequence
-      + slave 侧实时 preconditions（committed snapshot + overlay 计算的目标状态哈希）；源服裁决保留
-      模拟上下文执行（跨进程无玩家实体，权限按玩家元数据映射，CACHE_PROTOCOL §3 更新）。
-- [ ] 拒绝/竞争路径：不可破坏方块（destroyTime<0）、距离外、两人竞争同一方块 → overlay 落回
+- [x] 草稿 `draft/real-player-operations/` 三步流程：参考仓库（既有操作管道）、官方
+      （ServerGamePacketListenerImpl.handlePlayerAction/handleUseItemOn、
+      ServerPlayerGameMode.handleBlockBreakAction、Level.setBlock/LevelChunk.setBlockState；
+      26.3 字段/动作名来自 minecraft-assets）、差异取舍（slave 不做世界计算 → 只取客户端
+      意图 + 预测，源服主线程裁决核心不变）。
+- [x] SpectateGate 改造：handlePlayerAction 的 START_DESTROY_BLOCK（创造模式 instabuild 即时
+      破坏）与 handleUseItemOn（BlockItem PLACE）→ 路由至 PlayerOperationHandler 操作管道；
+      ABORT/STOP_DESTROY_BLOCK 与其余互动（使用物品/交互实体/丢弃/换手/冲刺）保持拒绝
+      （回显撤销）；主线程守卫（isSameThread，避免 ensureRunningOnSameThread 双触发）。
+- [x] 预检验：OperationGate 纯逻辑（可服务性/instabuild/距离/BREAK 目标非 air·非不可破坏·非
+      GameMasterBlock/PLACE 目标 air·可替换·非复杂放置/overlay 单 pending），fail closed。
+- [x] 预测可见性：overlay 预测经已装载 LevelChunk 内存态应用（setBlock UPDATE_CLIENTS →
+      vanilla 广播 ClientboundBlockUpdatePacket 给玩家视角）；不写对象库/不落盘（SaveGate 已禁
+      持久化）；REJECTED → RESYNC 就地 refreshLoaded（改为 UPDATE_CLIENTS，修复原 UPDATE_NONE
+      不通知客户端）+ 重应用该 chunk 其余 pending 预测；COMMITTED → 快照到达刷新（玩家在
+      chunk 内走就地刷新，避免卸载引用不降 0 的 10s 超时）。
+- [x] 真实玩家上下文提交：SUBMIT_OPERATION 携带真实 playerId（玩家 UUID 字节）/virtualSessionId
+      （"uuid:"+UUID）/clientInteractionSequence（互动包 sequence）+ slave 侧实时 preconditions
+      （sha256hex(BlockState.toString)，与源服 OperationAdjudicator.hash 同算法）；源服裁决保留
+      模拟上下文执行（权限按玩家元数据映射）；CACHE_PROTOCOL §3 已同步。
+- [x] 复杂放置拒绝（源服 + slave 同判定）：hasBlockEntity（容器等，setBlock 建空 BE）/双格
+      结构（DoublePlantBlock/DoorBlock/BedBlock，setBlock 只放半格）→ REJECTED，权威世界不
+      得产生畸形方块。
+- [x] 拒绝/竞争路径：不可破坏方块、距离外、两人竞争同一方块 → 回显撤销 + overlay 落回
       committed snapshot + RESYNC 范围（既有终态处理路径接线到玩家）。
-- [ ] 生存模式挖掘进度动画（ClientboundBlockDestructionPacket 逐 tick 进度）与掉落/经验语义：
-      v1 创造模式即时破坏闭环先行；生存路径在草稿中给出状态 resync plan，未完成前保持拒绝
-      （记录 parity matrix）。
+- [x] 生存模式挖掘进度动画（ClientboundBlockDestructionPacket 逐 tick 进度）与掉落/经验：
+      v1 创造模式即时破坏闭环已先行落地；生存路径保持拒绝（回显撤销，fail closed），
+      resync 计划与方向性放置/音效等差异记录于草稿与 parity matrix（#14-#18）。
+
+验证（阶段 8.1 已随实现落地）：OperationGateTest（全拒绝分支）、OperationOverlayTest
+（pendingInChunk）、PlayerOperationHandlerTest（哈希已知向量）、全组件测试绿；真机闭环验收
+归入 8.3。
 
 ### 8.2 快照覆盖扩容（修复"只能加载 1 个区块"）
 

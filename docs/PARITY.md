@@ -17,3 +17,8 @@
 | 11 | 光照空层 mask | vanilla `prepareSectionData`：引擎持有全零 DataLayer → 置 emptyMask | 快照 NBT 只存非空层，空层不置 mask 也不发数据 | 一致（渲染等价） | 客户端初始光照为 0，缺失 mask 视为无变化 → 同样全零；草稿 phase3-virtual-backend §2 |
 | 12 | 登录/身份 | 原版 online mode（Mojang 验证） | 阶段3 虚拟后端 offline 模式（离线 UUID，名字哈希），Auth Gateway 接入为阶段0/4 | 阶段限制 | HIERARCHY §3；LoginSession 扩展点 |
 | 13 | 区块包编码非确定部分 | vanilla 同一快照的编码字节 | 虚拟后端从快照 NBT 确定性重编码（同输入同输出，测试锁定） | 一致 | 真实快照 golden 测试；vanilla 本身依赖内存态（调色板/光照引擎），无字节级参照 |
+| 14 | 生存模式挖掘 | vanilla 逐 tick 挖掘进度（ClientboundBlockDestructionPacket）+ 破坏掉落/经验 | v1 只接创造模式（instabuild 即时破坏）；生存玩家挖掘保持拒绝（回显撤销，fail closed） | 阶段限制 | 阶段 8.1；挖掘动画/掉落/经验为阶段 8 延后项 |
+| 15 | 破坏音效/粒子 | vanilla destroyBlock 触发 world event（音效/粒子） | v1 只发 ClientboundBlockUpdatePacket（UPDATE_CLIENTS），无音效/粒子 | 阶段限制 | 阶段 8.1；草稿 real-player-operations §3 |
+| 16 | 方向性放置状态 | vanilla BlockItem.place 用 getStateForPlacement（玩家朝向/waterlogged） | v1 用 defaultBlockState（如楼梯恒朝北）；客户端以回显更新校正 | 有意差异 | 阶段 8.1；草稿 real-player-operations §5 待办 |
+| 17 | 容器/双格/门/床放置 | vanilla BlockItem.place 处理块实体建置与 setPlacedBy、双格结构 placeAt | v1 拒绝（complex-placement-block：hasBlockEntity/DoublePlantBlock/DoorBlock/BedBlock，源服同判定） | 阶段限制 | 阶段 8.1；防权威世界畸形（setBlock 只放半格/空 BE） |
+| 18 | 放置音效 | vanilla place 触发音效 | v1 无音效 | 阶段限制 | 阶段 8.1 |

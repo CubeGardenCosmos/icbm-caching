@@ -111,4 +111,22 @@ class OperationOverlayTest {
         assertTrue(overlay.hasPendingAt(10, 64, 20), "相交位置操作必须排队（单 pending）");
         assertFalse(overlay.hasPendingAt(11, 64, 20), "相邻位置不受影响");
     }
+
+    @Test
+    void pendingInChunkListsOnlyThatChunk() {
+        OperationOverlay overlay = new OperationOverlay();
+        Messages.SubmitOperation inChunk = op(10, 20);      // chunk 0,1
+        Messages.SubmitOperation otherChunk = op(30, 40);   // chunk 1,2
+        overlay.submit(hexOf(inChunk.operationId()), "player-a", inChunk, "minecraft:diamond_block");
+        overlay.submit(hexOf(otherChunk.operationId()), "player-b", otherChunk, "minecraft:stone");
+
+        List<OperationOverlay.Pending> found = overlay.pendingInChunk(0, 1);
+        assertEquals(1, found.size(), "只列出该 chunk 的 pending（阶段 8.1 重应用预测用）");
+        assertEquals(10, found.get(0).posX);
+        assertEquals(20, found.get(0).posZ);
+        assertEquals("minecraft:diamond_block", found.get(0).predictedState);
+        assertTrue(overlay.pendingInChunk(1, 2).stream()
+                .allMatch(p -> p.posX == 30 && p.posZ == 40));
+        assertTrue(overlay.pendingInChunk(9, 9).isEmpty());
+    }
 }

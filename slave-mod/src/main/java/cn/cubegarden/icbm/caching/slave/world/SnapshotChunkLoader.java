@@ -56,10 +56,17 @@ public final class SnapshotChunkLoader {
         return this.masterConnected;
     }
 
+    /** 服务维度（操作提交用）。 */
+    public DimensionRef dimension() {
+        return this.dimension;
+    }
+
     /**
      * 刷新已装载区块：重新解析对象库最新快照 → 逐方块应用到已装载 LevelChunk
-     * （flags=0 不触发方块事件；slave 装载 committed snapshot 语义——非世界计算/非写回）。
-     * 卸载路径（SnapshotReloader）因引用不降 0（saveSync 依赖未完成）卡住时的兜底。
+     * （flags=UPDATE_CLIENTS：变更广播给追踪玩家——阶段 8.1 修复原 UPDATE_NONE 只改服务端
+     * 不通知客户端，真实玩家会保留被拒/过期的预测）。slave 装载 committed snapshot 语义——
+     * 非世界计算/非写回；区块实体由 setBlockState 自动增删（LevelChunk.java:322/346 对照）。
+     * 卸载路径（SnapshotReloader）因引用不降 0（玩家在 chunk 内）卡住时的兜底与 RESYNC 路径。
      * 在 Server thread 调用。返回 true 表示已应用；false = 无新快照/装载失败（保持现状）。
      */
     public boolean refreshLoaded(ServerLevel level, ChunkPos pos) {
@@ -87,7 +94,7 @@ public final class SnapshotChunkLoader {
                 }
             }
         }
-        LOGGER.info("[icbm-slave] 区块刷新: 已就地应用快照 {},{}", pos.x(), pos.z());
+        LOGGER.info("[icbm-slave] 区块刷新: 已就地应用快照 {},{}（UPDATE_CLIENTS）", pos.x(), pos.z());
         return true;
     }
 
@@ -106,6 +113,16 @@ public final class SnapshotChunkLoader {
         }
         long epoch = this.store.dimensionEpoch(this.dimension);
         return epoch <= 0 || index.committedEpoch() == epoch;
+    }
+
+    /** 目标 chunk 的 committed revision（操作 baseRevision 快速拒绝用；未装载/无对象 → 0）。 */
+    public long committedRevision(int chunkX, int chunkZ) {
+        if (this.dimension == null) {
+            return 0;
+        }
+        ChunkRef key = ChunkRef.of(this.dimension, chunkX, chunkZ);
+        SnapshotObjectStore.ChunkIndex index = this.store.indexOf(key);
+        return index == null ? 0 : index.committed();
     }
 
     /**

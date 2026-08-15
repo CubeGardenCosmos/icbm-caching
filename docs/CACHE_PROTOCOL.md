@@ -207,7 +207,21 @@ committed snapshot 基线。
 裁决语义（26.3 ServerPlayerGameMode.destroyBlock 对照）：前置条件 = 目标非 air（BREAK）/ 可替换
 （PLACE）+ preconditions 哈希 == 权威状态哈希 + 非 GameMasterBlock；执行走 level.setBlock/removeBlock
 （Level.java:216 权威世界修改底层）；成功 → 脏标记 + revision 递增（快照管道随后发布新状态）。
-v1 操作者 = 模拟玩家（无真实玩家会话）；真实玩家接线（阶段 8）时替换模拟上下文，裁决核心不变。
+PLACE 复杂放置拒绝（阶段 8.1）：hasBlockEntity（容器/告示牌等，setBlock 会建空 BE 且无 setPlacedBy
+副作用）与双格结构（DoublePlantBlock/DoorBlock/BedBlock，setBlock 只放半格）→ REJECTED，权威世界
+不得产生畸形方块；slave 预检验同判定，提前拒绝不发提交。
+
+真实玩家接线（阶段 8.1）：slave 把真实玩家互动包（创造模式 START_DESTROY_BLOCK / BlockItem 放置）
+接入操作管道——预检验（目标区块可服务 + 距离内 + 目标状态合法 + overlay 单 pending，fail closed）
+→ overlay 预测登记并应用到已装载 LevelChunk（UPDATE_CLIENTS，玩家视角即时可见；不写对象库/不落盘）
+→ SUBMIT_OPERATION：operationId=新 UUID；playerId=玩家 UUID（16 字节）；virtualSessionId="uuid:"+UUID
+（master 按 operationId 路由回发起 slave，忽略该字段）；clientInteractionSequence=互动包 sequence；
+baseRevision=slave 所见目标 chunk committed revision（快速拒绝，非唯一冲突键）；preconditions=
+sha256hex(BlockState.toString)（slave 视图 = committed snapshot + overlay 已应用预测，相交操作被单
+pending 挡住）。源服裁决仍以模拟上下文执行（跨进程无玩家实体；权限按玩家元数据映射，GameMasterBlock
+按模拟权限级别拒绝）。终态回发后 slave：COMMITTED → 清预测，快照到达刷新（玩家在 chunk 内走就地
+刷新，UPDATE_CLIENTS 广播）；REJECTED → RESYNC 落回 committed snapshot 并重应用该 chunk 其余
+pending 预测（overlay 是唯一增量）。生存模式挖掘动画（逐 tick 进度）与掉落/经验延后，保持拒绝。
 
 slave 侧：可丢弃 overlay（内存 Map，不落盘、不写 committed snapshot）登记预测；COMMITTED → 清除
 该 pos 预测（真实快照随后覆盖）；REJECTED → 清除预测并落回 committed snapshot（源服拒绝即世界未变，
