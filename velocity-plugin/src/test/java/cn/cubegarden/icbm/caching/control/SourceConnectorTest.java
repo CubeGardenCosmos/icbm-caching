@@ -87,7 +87,8 @@ class SourceConnectorTest {
                 "127.0.0.1",
                 this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
                 "master-1", "lobby-1", PSK, 0,
-                Map.of(), null, 16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
+                Map.of("1112131415161718191a1b1c1d1e1f20", "SLAVE"),
+                null, 16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
         this.store = new SnapshotObjectStore(this.config.storeRoot(), this.config.serverName());
         this.store.recover();
         this.eventLog = new EventLog(this.config.eventLogPath(), this.config.maxEventLogEntries());

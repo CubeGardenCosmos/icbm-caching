@@ -48,9 +48,16 @@ public final class BackendControlServer implements AutoCloseable {
     private final BackendControlSession.HelloConfig helloConfig;
     private final ConnectionListener connectionListener;
 
+    /** AUTH 帧长度上限（明文握手帧 ~40 字节；未认证连接不得触发帧上限分配，A2 审计修复）。 */
+    private static final int MAX_AUTH_FRAME_BYTES = 4096;
+
+    /** 并发连接上限（防半开连接线程耗尽 DoS；A2 审计修复）。 */
+    private static final int MAX_CONNECTIONS = 128;
+
     private ServerSocket serverSocket;
     private Thread acceptThread;
     private ExecutorService sessionPool;
+    private final java.util.concurrent.Semaphore connectionSlots = new java.util.concurrent.Semaphore(MAX_CONNECTIONS);
     private final AtomicBoolean stopped = new AtomicBoolean();
 
     public BackendControlServer(String bindHost, int bindPort, String forwardingSecret,
@@ -90,7 +97,22 @@ public final class BackendControlServer implements AutoCloseable {
         while (!this.stopped.get()) {
             try {
                 Socket socket = this.serverSocket.accept();
-                this.sessionPool.execute(() -> this.handleConnection(socket));
+                if (!this.connectionSlots.tryAcquire()) {
+                    try {
+                        socket.setSoLinger(true, 0);
+                        socket.close();
+                    } catch (IOException ignored) {
+                    }
+                    LOGGER.warn("[icbm-source] backend 连接数达上限，拒绝: {}", socket.getRemoteSocketAddress());
+                    continue;
+                }
+                this.sessionPool.execute(() -> {
+                    try {
+                        this.handleConnection(socket);
+                    } finally {
+                        this.connectionSlots.release();
+                    }
+                });
             } catch (IOException e) {
                 if (!this.stopped.get()) {
                     LOGGER.warn("[icbm-source] backend accept 异常: {}", e.getMessage());
@@ -123,7 +145,7 @@ public final class BackendControlServer implements AutoCloseable {
                 return;
             }
             long length = in.readInt() & 0xFFFFFFFFL;
-            if (length < 8 || length > ProtocolConstants.MAX_ENCAPSULATED_FRAME_BYTES) {
+            if (length < 8 || length > MAX_AUTH_FRAME_BYTES) {
                 socket.setSoLinger(true, 0);
                 socket.close();
                 return;

@@ -57,13 +57,20 @@ def _write_source_control_config(master_props: dict[str, str]) -> None:
     secret = master_props.get("control.backendForwardingSecret", "")
     if not secret:
         raise RuntimeError("master control.properties 缺少 backendForwardingSecret")
-    (world / "icbm-control.properties").write_text(
+    source_control = world / "icbm-control.properties"
+    source_control.write_text(
         f"icbm.backend.forwardingSecret={secret}\n"
         f"icbm.backend.bind=0.0.0.0\n"
         f"icbm.backend.port={BACKEND_PORT}\n"
         "icbm.control.sourceServerId=source-server\n"
         "icbm.control.serverName=lobby-1\n"
     )
+    # A13 审计修复：含 backend secret 的配置权限收紧
+    import os as _os
+    try:
+        _os.chmod(source_control, 0o600)
+    except OSError:
+        pass
     print(f"源服控制配置: {world / 'icbm-control.properties'}（backend 授信 {BACKEND_PORT}）")
 
 

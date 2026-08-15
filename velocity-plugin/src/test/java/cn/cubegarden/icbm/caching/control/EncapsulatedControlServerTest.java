@@ -71,7 +71,10 @@ class EncapsulatedControlServerTest {
                 "127.0.0.1",
                 this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
                 "master-1", "lobby-1", PSK, 0,
-                java.util.Map.of(), null, 16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
+                java.util.Map.of(
+                        "0102030405060708090a0b0c0d0e0f10", "SOURCE",
+                        "1112131415161718191a1b1c1d1e1f20", "SLAVE"),
+                null, 16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
         this.store = new SnapshotObjectStore(config.storeRoot(), config.serverName());
         this.store.recover();
         EventLog eventLog = new EventLog(config.eventLogPath(), config.maxEventLogEntries());

@@ -24,9 +24,15 @@ class TicketVaultTest {
         TicketVault vault = new TicketVault();
         assertTrue(vault.redeem("aabbccdd"));
         String sessionId = "sess-1";
-        vault.activate(sessionId);
+        vault.activate(sessionId, System.currentTimeMillis() + 60_000);
         assertTrue(vault.isActive(sessionId));
         assertEquals(1, vault.activeCount());
+        // 过期清理（A9）
+        vault.activate("sess-expired", System.currentTimeMillis() - 1);
+        assertEquals(2, vault.activeCount());
+        assertEquals(1, vault.purgeExpired(System.currentTimeMillis()));
+        assertFalse(vault.isActive("sess-expired"));
+        assertTrue(vault.isActive(sessionId));
 
         vault.revoke(sessionId);
         assertFalse(vault.isActive(sessionId));

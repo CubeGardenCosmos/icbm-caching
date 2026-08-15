@@ -116,6 +116,13 @@ public final class SlaveMod implements ModInitializer {
                 new cn.cubegarden.icbm.caching.slave.world.SnapshotReloader(loader);
         client.setSnapshotReloader(reloader);
         client.setServerRef(server);
+        // A8：断线 → 丢弃全部 overlay 预测（fail closed；重连后 master 重订阅补齐，世界以快照为准）
+        client.setDisconnectCleanup(() -> {
+            int dropped = overlay.discardAll();
+            if (dropped > 0) {
+                LOGGER.warn("[icbm-slave] master 断开：丢弃 {} 项 overlay 预测（fail closed）", dropped);
+            }
+        });
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(
                 tickServer -> reloader.onServerTick(tickServer));
         SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,

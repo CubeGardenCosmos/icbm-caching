@@ -45,10 +45,18 @@ public final class EncapsulatedCipher {
     private final SecretKeySpec key;
     private final long directionTag;
     private final AtomicLong counter = new AtomicLong();
+    /** 复用 Cipher 实例（每方向单线程使用：encrypt 经 out 锁串行、decrypt 单 reader；
+     *  每次 doFinal 前重新 init，避免热路径 JCE getInstance 查找开销，B1 审计修复）。 */
+    private final Cipher cipher;
 
     private EncapsulatedCipher(byte[] keyBytes, long directionTag) {
         this.key = new SecretKeySpec(keyBytes, "ChaCha20");
         this.directionTag = directionTag;
+        try {
+            this.cipher = Cipher.getInstance("ChaCha20-Poly1305");
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("ChaCha20-Poly1305 不可用", e);
+        }
     }
 
     /** 方向密钥字节（测试/审计用）。 */
@@ -59,12 +67,11 @@ public final class EncapsulatedCipher {
     /** 加密一帧：返回密文（长度 = 明文 + 16 字节 AEAD tag）。 */
     public byte[] encrypt(byte[] plaintext, byte[] aad) {
         try {
-            Cipher cipher = Cipher.getInstance("ChaCha20-Poly1305");
-            cipher.init(Cipher.ENCRYPT_MODE, this.key, new IvParameterSpec(nextNonce()));
+            this.cipher.init(Cipher.ENCRYPT_MODE, this.key, new IvParameterSpec(nextNonce()));
             if (aad != null && aad.length > 0) {
-                cipher.updateAAD(aad);
+                this.cipher.updateAAD(aad);
             }
-            return cipher.doFinal(plaintext);
+            return this.cipher.doFinal(plaintext);
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("ChaCha20-Poly1305 加密失败", e);
         }
@@ -73,12 +80,11 @@ public final class EncapsulatedCipher {
     /** 解密一帧；篡改/tag 不匹配/格式错误 → IOException（fail closed）。 */
     public byte[] decrypt(byte[] ciphertext, byte[] aad) throws IOException {
         try {
-            Cipher cipher = Cipher.getInstance("ChaCha20-Poly1305");
-            cipher.init(Cipher.DECRYPT_MODE, this.key, new IvParameterSpec(nextNonce()));
+            this.cipher.init(Cipher.DECRYPT_MODE, this.key, new IvParameterSpec(nextNonce()));
             if (aad != null && aad.length > 0) {
-                cipher.updateAAD(aad);
+                this.cipher.updateAAD(aad);
             }
-            return cipher.doFinal(ciphertext);
+            return this.cipher.doFinal(ciphertext);
         } catch (GeneralSecurityException e) {
             throw new IOException("封装帧解密失败（篡改或密钥不匹配）", e);
         }

@@ -56,7 +56,8 @@ public final class ControlServiceMain {
                 new cn.cubegarden.icbm.caching.control.auth.MojangSessionVerifier(
                         config.auth().verifyMojang(), config.auth().mojangTimeoutMillis());
         byte[] assertionKey = config.auth().assertionKey().isEmpty()
-                ? randomKey() : config.auth().assertionKey().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                ? loadOrCreateAssertionKey(config.storeRoot())
+                : config.auth().assertionKey().getBytes(java.nio.charset.StandardCharsets.UTF_8);
         cn.cubegarden.icbm.caching.control.auth.IdentitySigner signer =
                 cn.cubegarden.icbm.caching.control.auth.IdentitySigner.fromKey(assertionKey);
         cn.cubegarden.icbm.caching.control.routing.BackendHealth backendHealth =
@@ -70,6 +71,20 @@ public final class ControlServiceMain {
                 new cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener(
                         sessionRegistry, ticketVault, verifier, signer, routing,
                         config.serverId(), 60_000);
+        // 过期断言周期清理（A9 审计修复；每 30s 一次，防会话表泄漏）
+        java.util.concurrent.ScheduledExecutorService authCleanup =
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "icbm-auth-cleanup");
+                    t.setDaemon(true);
+                    return t;
+                });
+        authCleanup.scheduleAtFixedRate(() -> {
+            try {
+                authGateway.purgeExpired();
+            } catch (RuntimeException e) {
+                LOGGER.warn("[control] 断言过期清理异常: {}", e.toString());
+            }
+        }, 30, 30, java.util.concurrent.TimeUnit.SECONDS);
         cn.cubegarden.icbm.caching.control.bridge.PacketLog packetLog =
                 new cn.cubegarden.icbm.caching.control.bridge.PacketLog(4096);
         cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge bridge =
@@ -90,11 +105,14 @@ public final class ControlServiceMain {
         }
 
         java.util.concurrent.CountDownLatch shutdown = new java.util.concurrent.CountDownLatch(1);
+        EventLog eventLogRef = eventLog;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             encapsulated.close();
             if (sourceRef != null) {
                 sourceRef.close();
             }
+            eventLogRef.close();
+            authCleanup.shutdownNow();
             shutdown.countDown();
         }));
         LOGGER.info("[control] master 就绪：对象库={} events={} 封装通道={}:{} psk={}位 peerBindings={} backend={}",
@@ -105,10 +123,36 @@ public final class ControlServiceMain {
         shutdown.await();
     }
 
-    private static byte[] randomKey() {
-        byte[] key = new byte[32];
-        new java.security.SecureRandom().nextBytes(key);
-        return key;
+    /**
+     * 断言签名密钥持久化（A4 审计修复）：未配置时首次生成并写入
+     * {@code <storeRoot>/assertion.key}（0600），重启复用——随机每次启动会令旧断言全部
+     * 失效、踢掉活跃会话。密钥随文件分发（运维），或配置 control.auth.assertionKey。
+     */
+    private static byte[] loadOrCreateAssertionKey(Path storeRoot) {
+        Path keyFile = storeRoot.resolve("assertion.key");
+        try {
+            if (Files.isRegularFile(keyFile)) {
+                byte[] existing = Files.readAllBytes(keyFile);
+                if (existing.length >= 16) {
+                    return existing;
+                }
+                LOGGER.warn("[control] assertion.key 过短（{} 字节），重新生成", existing.length);
+            }
+            byte[] key = new byte[32];
+            new java.security.SecureRandom().nextBytes(key);
+            Files.createDirectories(storeRoot);
+            Files.write(keyFile, key, java.nio.file.StandardOpenOption.CREATE_NEW);
+            try {
+                Files.setPosixFilePermissions(keyFile,
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } catch (UnsupportedOperationException ignored) {
+                // 非 POSIX 文件系统（Windows）跳过
+            }
+            LOGGER.info("[control] 已生成断言签名密钥: {}", keyFile);
+            return key;
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("断言签名密钥持久化失败（fail closed）: " + keyFile, e);
+        }
     }
 
     private static ServiceConfig loadConfig(Path path) throws Exception {

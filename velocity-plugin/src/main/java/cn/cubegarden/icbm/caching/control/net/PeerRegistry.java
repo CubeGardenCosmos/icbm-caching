@@ -40,7 +40,11 @@ public final class PeerRegistry {
     public String register(ControlSession session, Role helloRole, String modpackFingerprint,
                            String registryFingerprint) {
         Role boundRole = this.roleForBinding(session.bindingId());
-        if (boundRole != null && boundRole != helloRole) {
+        if (boundRole == null) {
+            // 未配置绑定的 AUTH UUID 拒绝（防 roleBindings 漏配 → 任意角色声明，A5 审计修复）
+            return "AUTH UUID " + session.bindingId() + " 未配置 roleBindings 绑定（拒绝）";
+        }
+        if (boundRole != helloRole) {
             return "鉴权绑定 " + session.bindingId() + " 绑定角色 " + boundRole
                     + " 与 HELLO.role " + helloRole + " 不一致";
         }

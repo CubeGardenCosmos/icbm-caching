@@ -107,8 +107,15 @@ def write_slave_control_config(master_props: dict[str, str]) -> None:
         "control.heartbeatIntervalMillis=8000\n"
         "control.selfcheck=true\n"
     )
-    (world / "icbm-control.properties").write_text(props)
-    print(f"slave 控制配置: {world / 'icbm-control.properties'}（serverName={server_name} uuid={slave_uuid}）")
+    slave_control = world / "icbm-control.properties"
+    slave_control.write_text(props)
+    # A13 审计修复：含 PSK 的配置权限收紧
+    try:
+        import os as _os
+        _os.chmod(slave_control, 0o600)
+    except OSError:
+        pass
+    print(f"slave 控制配置: {slave_control}（serverName={server_name} uuid={slave_uuid}）")
 
 
 def _slave_uuid_from_bindings(bindings: str) -> str:

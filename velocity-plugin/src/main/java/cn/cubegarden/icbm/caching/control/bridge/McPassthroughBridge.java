@@ -60,6 +60,12 @@ public final class McPassthroughBridge {
             return;
         }
         synchronized (this.lock) {
+            EncapsulatedControlSession active = this.activeSlaveSession;
+            if (active != null && active != slaveSession) {
+                // v1 单一活跃权威会话：并发 slave 报文拒绝（不混淆源服会话，A3 审计修复）
+                LOGGER.warn("[control] 权威桥：已有活跃权威会话，拒绝并发 slave 报文（fail closed）");
+                return;
+            }
             this.activeSlaveSession = slaveSession;
         }
         this.packetLog.append(DIR_SLAVE_TO_BACKEND, body);

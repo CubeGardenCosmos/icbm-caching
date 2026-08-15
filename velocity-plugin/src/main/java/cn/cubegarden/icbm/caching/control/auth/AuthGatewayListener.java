@@ -36,6 +36,10 @@ public final class AuthGatewayListener implements EncapsulatedControlSession.Lis
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthGatewayListener.class);
 
+    /** 登录限速（A10 审计修复）：单连接验证失败/服务不可用计数；超过阈值 → 该连接拒绝
+     *  后续验证（防 Mojang hasJoined 被打爆；slave 连接是受信面，正常流量远低于阈值）。 */
+    private static final int MAX_FAILURES_PER_CONNECTION = 16;
+
     private final SessionRegistry registry;
     private final TicketVault ticketVault;
     private final MojangSessionVerifier verifier;
@@ -43,6 +47,9 @@ public final class AuthGatewayListener implements EncapsulatedControlSession.Lis
     private final RoutingPolicy routing;
     private final String issuer;
     private final long assertionTtlMillis;
+    /** 会话 id → 连续失败计数（上限阈值后拒绝；成功时清零）。 */
+    private final java.util.Map<String, Integer> failuresBySession =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public AuthGatewayListener(SessionRegistry registry, TicketVault ticketVault,
                                MojangSessionVerifier verifier, IdentitySigner signer,
@@ -68,10 +75,19 @@ public final class AuthGatewayListener implements EncapsulatedControlSession.Lis
         }
         String uuidHex = HexFormat.of().formatHex(req.playerUuid());
         String nonceHex = HexFormat.of().formatHex(req.nonce());
+        String sessionKey = session.uuidHex() + "|" + req.slaveId();
+
+        // A10：单连接失败限速（fail closed 前先拒绝后续验证请求）
+        if (this.failuresBySession.getOrDefault(sessionKey, 0) >= MAX_FAILURES_PER_CONNECTION) {
+            LOGGER.warn("[control] 登录验证限速触发（fail closed）: slave={}", req.slaveId());
+            this.reject(session, false, "RATE_LIMITED");
+            return;
+        }
 
         // 2. 单次兑换（票据不重放）
         if (!this.ticketVault.redeem(nonceHex)) {
             LOGGER.warn("[control] 票据重放被拒: uuid={} slave={}", uuidHex, req.slaveId());
+            this.countFailure(sessionKey);
             this.reject(session, false, "REPLAYED_NONCE");
             return;
         }
@@ -83,7 +99,8 @@ public final class AuthGatewayListener implements EncapsulatedControlSession.Lis
             this.reject(session, false, "DUPLICATE_SESSION");
             return;
         }
-        this.ticketVault.activate(sessionId);
+        long expiresAt = System.currentTimeMillis() + this.assertionTtlMillis;
+        this.ticketVault.activate(sessionId, expiresAt);
 
         // 4. 落点判定（白名单；serverName == slaveId）
         RoutingPolicy.RoutingDecision decision = this.routing.decide(
@@ -102,15 +119,19 @@ public final class AuthGatewayListener implements EncapsulatedControlSession.Lis
         } catch (MojangSessionVerifier.AuthenticationUnavailable e) {
             LOGGER.error("[control] Mojang 验证不可用（fail closed 拒绝）: {}", e.getMessage());
             this.rollback(uuidHex, sessionId);
+            this.countFailure(sessionKey);
             this.reject(session, false, "AUTH_SERVERS_UNAVAILABLE");
             return;
         }
         if (profile == null) {
             LOGGER.warn("[control] 未验证用户名（hasJoined 204）: {}", req.playerName());
             this.rollback(uuidHex, sessionId);
+            this.countFailure(sessionKey);
             this.reject(session, false, "UNVERIFIED_USERNAME");
             return;
         }
+        // 验证成功：清零限速计数
+        this.failuresBySession.remove(sessionKey);
 
         // 6. 断言签发（HMAC 签名 + profileProperties 随断言）
         Messages.MasterVerifiedIdentity identity = new Messages.MasterVerifiedIdentity(
@@ -127,10 +148,24 @@ public final class AuthGatewayListener implements EncapsulatedControlSession.Lis
     /** 连接断开清理（EncapsulatedControlServer 断开回调）：注销该 slave 的活跃会话。 */
     public int onSlaveDisconnected(String slaveId) {
         int count = this.registry.unregisterAllBySlave(slaveId);
+        for (java.util.Map.Entry<String, Integer> entry : this.failuresBySession.entrySet()) {
+            if (entry.getKey().endsWith("|" + slaveId)) {
+                this.failuresBySession.remove(entry.getKey());
+            }
+        }
         if (count > 0) {
             LOGGER.info("[control] slave 断开注销 {} 个活跃会话: {}", count, slaveId);
         }
         return count;
+    }
+
+    /** 周期清理过期断言（装配方定时调用；A9 审计修复）。 */
+    public int purgeExpired() {
+        return this.ticketVault.purgeExpired(System.currentTimeMillis());
+    }
+
+    private void countFailure(String sessionKey) {
+        this.failuresBySession.merge(sessionKey, 1, Integer::sum);
     }
 
     /** 失败路径回滚：注销记账 + 吊销票据（保证记账不泄漏）。 */

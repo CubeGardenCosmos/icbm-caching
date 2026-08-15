@@ -100,6 +100,12 @@ public final class OperationAdjudicator implements cn.cubegarden.icbm.caching.so
                 if (authority.isAir()) {
                     return new Rejected("already-air");
                 }
+                // 不可破坏方块（destroyTime -1，如 bedrock/barrier）拒绝：模拟玩家等价官方
+                // 玩家破坏（ServerPlayerGameMode.destroyBlock 挖不动），不得以命令级 setBlock 覆盖
+                // （A11 审计修复：权威世界不被模拟玩家越权改写）
+                if (authority.getBlock().defaultDestroyTime() < 0) {
+                    return new Rejected("unbreakable-block");
+                }
                 if (!level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS)) {
                     return new Rejected("set-block-failed");
                 }

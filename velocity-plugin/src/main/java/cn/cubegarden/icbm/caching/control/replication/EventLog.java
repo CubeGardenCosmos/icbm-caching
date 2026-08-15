@@ -50,6 +50,9 @@ public final class EventLog {
     private final long maxEntries;
     private final List<Event> events = new ArrayList<>();
     private long nextSeq = 1;
+    /** 追加写句柄（B2 审计修复：保持打开，避免每事件 open/close 磁盘 syscall 风暴；
+     *  由 recover 后的 append 懒打开；close() 关闭）。 */
+    private DataOutputStream appendOut;
 
     public EventLog(Path file, long maxEntries) {
         this.file = file;
@@ -131,19 +134,54 @@ public final class EventLog {
         this.events.add(event);
         try {
             Files.createDirectories(this.file.getParent());
-            // 追加写（单写者，synchronized）；写中断留下的不完整尾部由 recover 容忍截断
-            try (DataOutputStream out = new DataOutputStream(
-                    new BufferedOutputStream(Files.newOutputStream(this.file,
-                            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)))) {
-                writeEvent(out, event);
+            if (this.appendOut == null) {
+                this.appendOut = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(
+                        this.file, java.nio.file.StandardOpenOption.CREATE,
+                        java.nio.file.StandardOpenOption.APPEND)));
             }
+            writeEvent(this.appendOut, event);
+            this.appendOut.flush();
         } catch (IOException e) {
             throw new IllegalStateException("events.log 追加失败", e);
         }
-        while (this.events.size() > this.maxEntries) {
-            this.events.remove(0);
+        // 内存有界（原语义）；磁盘同步裁剪（B2：文件不无限增长——超限时重写为最新 maxEntries 条）
+        if (this.events.size() > this.maxEntries) {
+            this.events.subList(0, (int) (this.events.size() - this.maxEntries)).clear();
+            try {
+                this.rewriteFile();
+            } catch (IOException e) {
+                throw new IllegalStateException("events.log 裁剪失败（fail closed）", e);
+            }
         }
         return seq;
+    }
+
+    /** 磁盘裁剪：重写为内存中最新 maxEntries 条（低频；append 超限时才触发）。 */
+    private void rewriteFile() throws IOException {
+        if (this.appendOut != null) {
+            this.appendOut.close();
+            this.appendOut = null;
+        }
+        Path tmp = this.file.resolveSibling(this.file.getFileName() + ".rewrite");
+        try (DataOutputStream out = new DataOutputStream(
+                new BufferedOutputStream(Files.newOutputStream(tmp)))) {
+            for (Event event : this.events) {
+                writeEvent(out, event);
+            }
+        }
+        Files.move(tmp, this.file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /** 关闭追加句柄（master 停止时调用；幂等）。 */
+    public synchronized void close() {
+        if (this.appendOut != null) {
+            try {
+                this.appendOut.close();
+            } catch (IOException ignored) {
+            }
+            this.appendOut = null;
+        }
     }
 
     private static void writeEvent(DataOutputStream out, Event event) throws IOException {

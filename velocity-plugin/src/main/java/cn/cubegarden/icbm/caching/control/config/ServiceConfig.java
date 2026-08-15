@@ -101,9 +101,16 @@ public record ServiceConfig(
                 bindings.put(kv[0].trim(), roleName);
             }
         }
+        String psk = props.getProperty("control.psk", d.psk());
+        if (psk.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 16) {
+            throw new IllegalArgumentException("control.psk 过短（至少 16 字节；运维手册禁止弱公共密码，A6 审计修复）");
+        }
         String backendHost = props.getProperty("control.backendHost", "").trim();
         int backendPort = Integer.parseInt(props.getProperty("control.backendPort", "11430"));
         String backendSecret = props.getProperty("control.backendForwardingSecret", "").trim();
+        if (!backendSecret.isEmpty() && backendSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 16) {
+            throw new IllegalArgumentException("control.backendForwardingSecret 过短（至少 16 字节）");
+        }
         BackendServer backend = (!backendHost.isEmpty() && !backendSecret.isEmpty())
                 ? new BackendServer(backendHost, backendPort, backendSecret) : null;
         return new ServiceConfig(
@@ -113,7 +120,7 @@ public record ServiceConfig(
                 Integer.parseInt(props.getProperty("control.maxEventLogEntries", Integer.toString(d.maxEventLogEntries()))),
                 props.getProperty("control.serverId", d.serverId()),
                 props.getProperty("control.serverName", d.serverName()),
-                props.getProperty("control.psk", d.psk()),
+                psk,
                 Integer.parseInt(props.getProperty("control.encapsulatedPort", Integer.toString(d.encapsulatedPort()))),
                 bindings,
                 backend,
@@ -127,10 +134,19 @@ public record ServiceConfig(
                                 Boolean.toString(d.auth().verifyMojang()))),
                         Long.parseLong(props.getProperty("control.auth.mojangTimeoutMillis",
                                 Long.toString(d.auth().mojangTimeoutMillis()))),
-                        props.getProperty("control.auth.assertionKey", d.auth().assertionKey())),
+                        assertionKey(props.getProperty("control.auth.assertionKey", d.auth().assertionKey()))),
                 Arrays.stream(props.getProperty("control.allowedServerNames", "").split(","))
                         .map(String::trim).filter(s -> !s.isEmpty()).toList()
         );
+    }
+
+    /** assertionKey 校验（A6：签名密钥至少 16 字节；空 = 未配置，由入口生成并持久化）。 */
+    private static String assertionKey(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (!trimmed.isEmpty() && trimmed.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 16) {
+            throw new IllegalArgumentException("control.auth.assertionKey 过短（至少 16 字节）");
+        }
+        return trimmed;
     }
 
     private static Path path(Properties props, String key, Path fallback, Path baseDir) {

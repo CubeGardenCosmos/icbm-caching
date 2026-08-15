@@ -14,7 +14,6 @@ import cn.cubegarden.icbm.caching.protocol.store.SnapshotObjectStore;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -38,13 +37,18 @@ public final class Replicator {
 
     /** 单个 slave 订阅状态（随连接生命周期，无全局可变状态）。 */
     public static final class SlaveSubscription {
+        /** 流控排队上限（A7 审计修复：slave 卡死不 ACK → pending 无限增长；超限视为失联
+         *  断开由调用方处理——fail closed，不静默丢事件）。 */
+        static final int PENDING_LIMIT = 4096;
         final ControlSession session;
         final Set<DimensionRef> dimensions;
         volatile long ackedSequence;
         volatile long lastReceivedSequence;
         volatile long lastAckTime;
         volatile boolean lagging;
-        final ArrayDeque<EventLog.Event> pending = new ArrayDeque<>();
+        /** 并发安全队列（源服 reader broadcast 写 / slave reader onAck 读；A7 审计修复）。 */
+        final java.util.concurrent.ConcurrentLinkedDeque<EventLog.Event> pending =
+                new java.util.concurrent.ConcurrentLinkedDeque<>();
 
         SlaveSubscription(ControlSession session, Set<DimensionRef> dimensions, long ackedSequence) {
             this.session = session;
@@ -156,6 +160,13 @@ public final class Replicator {
         }
         long inFlight = sub.lastReceivedSequence - sub.ackedSequence;
         if (inFlight >= this.config.pushWindow()) {
+            if (sub.pending.size() >= SlaveSubscription.PENDING_LIMIT) {
+                // 流控排队超限：slave 长时间不 ACK → fail closed（断开，重连重订阅补齐）
+                LOGGER.error("[control] slave {} 流控排队超限（{}），断开重订阅（fail closed）",
+                        sub.session.sourceServerId(), SlaveSubscription.PENDING_LIMIT);
+                sub.session.fail("push window overflow");
+                return;
+            }
             sub.pending.addLast(event); // 窗口满：排队等待 ACK 推进（流控）
             return;
         }

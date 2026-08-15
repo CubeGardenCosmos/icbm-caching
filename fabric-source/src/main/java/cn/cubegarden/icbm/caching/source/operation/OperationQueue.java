@@ -52,6 +52,8 @@ public final class OperationQueue {
     /** pending（未裁决）按提交序；pending 与 history 都按 operationId 去重。 */
     private final Deque<Messages.SubmitOperation> pending = new ArrayDeque<>();
     private final Map<String, Messages.SubmitOperation> pendingById = new ConcurrentHashMap<>();
+    /** 有界近似 LRU（A7 审计修复：主线程写 / backend 会话线程读——LinkedHashMap 非线程安全，
+     *  全部访问经 synchronized(history)）。 */
     private final Map<String, Messages.OperationStatusRes> history = new LinkedHashMap<>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, Messages.OperationStatusRes> eldest) {
@@ -67,9 +69,11 @@ public final class OperationQueue {
     /** 入队（backend 会话线程调用；裁决在主线程）。幂等：同一 operationId 重复 → 忽略。 */
     public void enqueue(Messages.SubmitOperation op) {
         String id = hex(op.operationId());
-        if (this.history.containsKey(id)) {
-            LOGGER.warn("[icbm-source] 重复操作提交（幂等忽略）: op={}", id);
-            return;
+        synchronized (this.history) {
+            if (this.history.containsKey(id)) {
+                LOGGER.warn("[icbm-source] 重复操作提交（幂等忽略）: op={}", id);
+                return;
+            }
         }
         if (this.pendingById.putIfAbsent(id, op) != null) {
             LOGGER.warn("[icbm-source] 重复操作提交（已排队）: op={}", id);
@@ -83,7 +87,10 @@ public final class OperationQueue {
     /** 状态查询（任意线程；backend 会话线程）。 */
     public Messages.OperationStatusRes query(Messages.GetOperationStatus req) {
         String id = hex(req.operationId());
-        Messages.OperationStatusRes terminal = this.history.get(id);
+        Messages.OperationStatusRes terminal;
+        synchronized (this.history) {
+            terminal = this.history.get(id);
+        }
         if (terminal != null) {
             return terminal;
         }
@@ -149,7 +156,9 @@ public final class OperationQueue {
         } else {
             throw new IllegalStateException("未知裁决结果: " + result);
         }
-        this.history.put(id, terminal);
+        synchronized (this.history) {
+            this.history.put(id, terminal);
+        }
     }
 
     private void send(MessageType type, Object body) {

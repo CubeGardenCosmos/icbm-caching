@@ -3,7 +3,6 @@ package cn.cubegarden.icbm.caching.control.auth;
 import cn.cubegarden.icbm.caching.protocol.Messages;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Arrays;
 import java.util.HexFormat;
 
 /**
@@ -66,7 +65,7 @@ public final class IdentitySigner {
         byte[] expected = hmac(canonical(identity.issuer(), identity.keyId(), identity.audience(),
                 identity.playerUuid(), identity.sessionId(), identity.nonce(),
                 identity.expiresAt(), identity.profileProperties()));
-        if (!Arrays.equals(expected, identity.signature())) {
+        if (!MessageDigest.isEqual(expected, identity.signature())) {
             return "断言签名无效";
         }
         if (identity.expiresAt() < System.currentTimeMillis()) {

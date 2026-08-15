@@ -8,11 +8,19 @@ import java.util.Objects;
  */
 public record DimensionRef(String namespace, String path) {
 
+    /** 26.3 Identifier 允许字符集（Identifier.java 规则；防对象库路径穿越，A1 审计修复）。 */
+    private static final java.util.regex.Pattern IDENTIFIER_PART =
+            java.util.regex.Pattern.compile("[a-z0-9_.-]+");
+
     public DimensionRef {
         Objects.requireNonNull(namespace, "namespace");
         Objects.requireNonNull(path, "path");
-        if (namespace.isEmpty() || path.isEmpty()) {
-            throw new IllegalArgumentException("empty dimension: " + namespace + ":" + path);
+        if (!IDENTIFIER_PART.matcher(namespace).matches() || !IDENTIFIER_PART.matcher(path).matches()) {
+            throw new IllegalArgumentException("非法维度标识（必须是 [a-z0-9_.-]+，防路径穿越）: "
+                    + namespace + ":" + path);
+        }
+        if (namespace.equals(".") || namespace.equals("..") || path.equals(".") || path.equals("..")) {
+            throw new IllegalArgumentException("维度标识不得为 . / ..: " + namespace + ":" + path);
         }
     }
 

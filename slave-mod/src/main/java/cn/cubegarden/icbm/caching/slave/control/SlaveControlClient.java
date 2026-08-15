@@ -58,6 +58,8 @@ public final class SlaveControlClient implements AutoCloseable {
     private Messages.LoginVerifyRes verifyResult;
     private volatile OperationListener operationListener;
     private volatile cn.cubegarden.icbm.caching.slave.world.SnapshotReloader snapshotReloader;
+    /** 断线清理回调（A8 审计修复：fail closed——断线后不得展示不确定的 overlay 预测）。 */
+    private volatile Runnable disconnectCleanup;
 
     public SlaveControlClient(
             SlaveConfig config,
@@ -163,6 +165,11 @@ public final class SlaveControlClient implements AutoCloseable {
     /** 装配快照刷新器（快照到达后重载已装载区块；null = 不刷新）。 */
     public void setSnapshotReloader(cn.cubegarden.icbm.caching.slave.world.SnapshotReloader reloader) {
         this.snapshotReloader = reloader;
+    }
+
+    /** 装配断线清理（A8：overlay discardAll 等 fail closed 动作；断线回调中调用）。 */
+    public void setDisconnectCleanup(Runnable cleanup) {
+        this.disconnectCleanup = cleanup;
     }
 
     /** 注入服务器引用（快照刷新用；由 SlaveMod 装配）。 */
@@ -278,6 +285,14 @@ public final class SlaveControlClient implements AutoCloseable {
         public void onDisconnected(Throwable cause) {
             SlaveControlClient.this.loader.setMasterConnected(false);
             SlaveControlClient.this.wakeVerify(null);
+            Runnable cleanup = SlaveControlClient.this.disconnectCleanup;
+            if (cleanup != null) {
+                try {
+                    cleanup.run(); // A8：丢弃全部 overlay 预测（fail closed，不展示不确定基线）
+                } catch (RuntimeException e) {
+                    LOGGER.error("[icbm-slave] 断线清理异常: {}", e.toString());
+                }
+            }
             LOGGER.warn("[icbm-slave] master 断开（服务闸门关闭，重连后重订阅）: {}",
                     cause == null ? "?" : cause.getMessage());
         }

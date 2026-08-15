@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 
 from ..infra import paths, shell
@@ -47,8 +48,14 @@ def write_control_config() -> None:
         "control.allowedServerNames=lobby-1\n"
     ).format(run=run_dir, psk=psk, assertion_key=assertion_key,
              source_uuid=source_uuid, slave_uuid=slave_uuid, backend_secret=backend_secret)
-    (run_dir / "control.properties").write_text(props)
-    print(f"master 配置: {run_dir / 'control.properties'}")
+    control_file = run_dir / "control.properties"
+    control_file.write_text(props)
+    # A13 审计修复：含 PSK/断言密钥的配置文件权限收紧（仅本用户可读）
+    try:
+        os.chmod(control_file, 0o600)
+    except OSError:
+        pass
+    print(f"master 配置: {control_file}")
     print(f"  PSK={psk}（仅本次生成；部署时按运维手册安全分发）")
     print(f"  backendForwardingSecret={backend_secret}（需同步到源服 icbm-control.properties）")
     print(f"  角色绑定: SOURCE={source_uuid} SLAVE={slave_uuid}")

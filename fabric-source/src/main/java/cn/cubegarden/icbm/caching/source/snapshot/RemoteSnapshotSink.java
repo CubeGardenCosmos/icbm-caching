@@ -44,9 +44,12 @@ public final class RemoteSnapshotSink implements SnapshotSink {
 
     private final BackendControlServer server;
     private final Map<ChunkKey, Long> pendingRequired = new ConcurrentHashMap<>();     // 未确认的最高 required（重发用）
-    private final Map<ChunkKey, ArrayDeque<PendingPut>> pendingPuts = new ConcurrentHashMap<>(); // 未 ack 的 put（保序重发）
+    /** 未 ack 的 put（保序重发）。ArrayDeque 由 outbox 线程与 backend reader 线程并发访问
+     *  （A7 审计修复：putSnapshot 主线程入队 / handlePutAck reader 出队——锁保护）。 */
+    private final Map<ChunkKey, ArrayDeque<PendingPut>> pendingPuts = new ConcurrentHashMap<>();
     private final Map<Long, PendingPut> awaitingAck = new ConcurrentHashMap<>();       // requestId → put
     private final Map<ChunkKey, Long> serverCommitted = new ConcurrentHashMap<>();     // 服务端已确认 committed
+    /** 等待 committed 确认的回调（主线程 add / reader 线程 drain——锁保护，A7 审计修复）。 */
     private final Map<ChunkKey, List<CommitCallback>> waitingCommits = new ConcurrentHashMap<>();
     private final Map<DimensionRef, Long> knownEpochs = new ConcurrentHashMap<>();
     private final AtomicLong requestIds = new AtomicLong(1);
@@ -107,7 +110,9 @@ public final class RemoteSnapshotSink implements SnapshotSink {
     @Override
     public void putSnapshot(ChunkSnapshot snapshot, PutCallback done) {
         PendingPut pending = new PendingPut(snapshot, done);
-        this.pendingPuts.computeIfAbsent(snapshot.key(), ignored -> new ArrayDeque<>()).addLast(pending);
+        synchronized (this.pendingPuts) {
+            this.pendingPuts.computeIfAbsent(snapshot.key(), ignored -> new ArrayDeque<>()).addLast(pending);
+        }
         this.outbox.add(() -> this.sendPut(pending));
     }
 
@@ -118,7 +123,9 @@ public final class RemoteSnapshotSink implements SnapshotSink {
             done.onCommitted(key, revision, true); // 服务端已随 PUT 原子提交
             return;
         }
-        this.waitingCommits.computeIfAbsent(key, ignored -> new ArrayList<>()).add(done);
+        synchronized (this.waitingCommits) {
+            this.waitingCommits.computeIfAbsent(key, ignored -> new ArrayList<>()).add(done);
+        }
     }
 
     @Override
@@ -321,12 +328,17 @@ public final class RemoteSnapshotSink implements SnapshotSink {
         ChunkKey key = pending.snapshot().key();
         if (ack.result() == cn.cubegarden.icbm.caching.protocol.PutResult.OK) {
             this.serverCommitted.put(key, ack.revision());
-            ArrayDeque<PendingPut> puts = this.pendingPuts.get(key);
-            if (puts != null) {
-                puts.removeFirstOccurrence(pending); // 已提交的出队（后续快照保序）
+            synchronized (this.pendingPuts) {
+                ArrayDeque<PendingPut> puts = this.pendingPuts.get(key);
+                if (puts != null) {
+                    puts.removeFirstOccurrence(pending); // 已提交的出队（后续快照保序）
+                }
             }
             pending.done().onResult(key, ack.revision(), SnapshotSink.PutResult.OK);
-            List<CommitCallback> waiters = this.waitingCommits.remove(key);
+            List<CommitCallback> waiters;
+            synchronized (this.waitingCommits) {
+                waiters = this.waitingCommits.remove(key);
+            }
             if (waiters != null) {
                 for (CommitCallback cb : waiters) {
                     cb.onCommitted(key, ack.revision(), true);
