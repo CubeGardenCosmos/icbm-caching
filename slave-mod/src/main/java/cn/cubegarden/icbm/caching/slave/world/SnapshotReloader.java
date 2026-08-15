@@ -89,7 +89,7 @@ public final class SnapshotReloader {
                 int cz = ChunkPos.getZ(key);
                 boolean applied = this.loader.refreshLoaded(level, new ChunkPos(cx, cz));
                 this.applyOverlayToChunk(level, cx, cz);
-                LOGGER.info("[icbm-slave] 区块 RESYNC（操作被拒，落回 committed + 重应用预测）: {},{} applied={}",
+                LOGGER.debug("[icbm-slave] 区块 RESYNC（操作被拒，落回 committed + 重应用预测）: {},{} applied={}",
                         cx, cz, applied);
             }
             this.pendingResync.clear();
@@ -104,12 +104,12 @@ public final class SnapshotReloader {
                         // 玩家在 chunk 内：卸载引用不降 0 → 就地刷新（UPDATE_CLIENTS 广播新状态）
                         boolean applied = this.loader.refreshLoaded(level, new ChunkPos(cx, cz));
                         this.applyOverlayToChunk(level, cx, cz);
-                        LOGGER.info("[icbm-slave] 区块刷新: 就地应用新快照（玩家在 chunk 内）: {},{} applied={}",
+                        LOGGER.debug("[icbm-slave] 区块刷新: 就地应用新快照（玩家在 chunk 内）: {},{} applied={}",
                                 cx, cz, applied);
                     } else {
                         this.pendingUnload.putIfAbsent(key, System.currentTimeMillis());
                         level.setChunkForced(cx, cz, false);
-                        LOGGER.info("[icbm-slave] 区块刷新: 已卸载 {},{}（等待重新装载命中新快照）", cx, cz);
+                        LOGGER.debug("[icbm-slave] 区块刷新: 已卸载 {},{}（等待重新装载命中新快照）", cx, cz);
                     }
                 }
             }
@@ -127,7 +127,7 @@ public final class SnapshotReloader {
                 level.setChunkForced(cx, cz, true);
                 it.remove();
                 this.applyOverlayToChunk(level, cx, cz);
-                LOGGER.info("[icbm-slave] 区块刷新: 已重新装载 {},{}（新快照注入 + 重应用预测）", cx, cz);
+                LOGGER.debug("[icbm-slave] 区块刷新: 已重新装载 {},{}（新快照注入 + 重应用预测）", cx, cz);
             } else if (now - entry.getValue() > UNLOAD_TIMEOUT_MILLIS) {
                 // 卸载卡住（引用不降 0，如 saveSync 依赖未完成/玩家重新进入）：恢复 force 并就地应用最新快照
                 level.setChunkForced(cx, cz, true);

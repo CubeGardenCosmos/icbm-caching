@@ -84,7 +84,7 @@ public final class Replicator {
             for (EventLog.Event event : replay) {
                 this.sendEvent(sub, event);
             }
-            LOGGER.info("[control] slave 订阅: {} dims={} ackedSeq={} 重放 {} 条",
+            LOGGER.debug("[control] slave 订阅: {} dims={} ackedSeq={} 重放 {} 条",
                     session.sourceServerId(), dimensions, msg.ackedSequence(), replay.size());
         }
     }
@@ -98,7 +98,7 @@ public final class Replicator {
         sub.lastAckTime = System.currentTimeMillis();
         if (sub.lagging && sub.ackedSequence >= sub.lastReceivedSequence) {
             sub.lagging = false;
-            LOGGER.info("[control] slave {} 恢复健康", session.sourceServerId());
+            LOGGER.debug("[control] slave {} 恢复健康", session.sourceServerId());
         }
         this.flushPending(sub);
     }

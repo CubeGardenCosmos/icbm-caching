@@ -73,7 +73,7 @@ public final class PeerRegistry {
         }
         this.sessions.put(session.sourceServerId(), session);
         this.roles.put(session.sourceServerId(), helloRole);
-        LOGGER.info("[control] peer 注册: id={} role={} binding={}", session.sourceServerId(), helloRole, session.bindingId());
+        LOGGER.debug("[control] peer 注册: id={} role={} binding={}", session.sourceServerId(), helloRole, session.bindingId());
         return null;
     }
 

@@ -119,7 +119,7 @@ public final class ChunkSnapshotTicker {
                         this.publisher.put(snapshot);
                         this.publisher.commit(snapshot.key(), snapshot.revision());
                         this.publisher.endTick(snapshot.key());
-                        LOGGER.info("[icbm-source] 已提交快照: {} rev={} epoch={}",
+                        LOGGER.debug("[icbm-source] 已提交快照: {} rev={} epoch={}",
                                 snapshot.key(), snapshot.revision(), snapshot.epoch());
                     });
                 });

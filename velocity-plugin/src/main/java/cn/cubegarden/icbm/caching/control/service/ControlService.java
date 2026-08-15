@@ -61,7 +61,7 @@ public final class ControlService implements AutoCloseable {
         long seq = this.eventLog.append(EventLog.EventType.WORLD_EPOCH, msg.dimension(), null,
                 msg.worldEpoch(), "", msg.registryAndDatapackFingerprint(), msg.spawn());
         this.replicator.onWorldEpoch(msg, seq);
-        LOGGER.info("[control] WORLD_EPOCH: dim={} epoch={} reason={}", msg.dimension(), msg.worldEpoch(), msg.reason());
+        LOGGER.debug("[control] WORLD_EPOCH: dim={} epoch={} reason={}", msg.dimension(), msg.worldEpoch(), msg.reason());
     }
 
     public void onInvalidate(ControlSession session, Messages.Invalidate msg) {

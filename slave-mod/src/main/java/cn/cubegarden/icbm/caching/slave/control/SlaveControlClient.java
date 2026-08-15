@@ -243,7 +243,7 @@ public final class SlaveControlClient implements AutoCloseable {
                 EncapsulatedChannelClient.encode(MessageType.SUBSCRIBE,
                         new Messages.Subscribe(this.subscribed.toArray(DimensionRef[]::new),
                                 true, this.lastAckedSequence)));
-        LOGGER.info("[icbm-slave] 订阅: dims={} ackedSeq={}", this.subscribed, this.lastAckedSequence);
+        LOGGER.debug("[icbm-slave] 订阅: dims={} ackedSeq={}", this.subscribed, this.lastAckedSequence);
     }
 
     private void ack(long sequence) {
@@ -275,7 +275,7 @@ public final class SlaveControlClient implements AutoCloseable {
         if (result == PutResult.OK) {
             try {
                 this.store.commit(key, snapshot.revision());
-                LOGGER.info("[icbm-slave] 已装载快照: {} rev={} epoch={}", key, snapshot.revision(), epoch);
+                LOGGER.debug("[icbm-slave] 已装载快照: {} rev={} epoch={}", key, snapshot.revision(), epoch);
                 // 快照到达：已装载区块需刷新（乐观操作 COMMITTED 后新状态展示给玩家视角）
                 cn.cubegarden.icbm.caching.slave.world.SnapshotReloader reloader = this.snapshotReloader;
                 if (reloader != null) {
@@ -312,7 +312,7 @@ public final class SlaveControlClient implements AutoCloseable {
         public void onConnected(String serverId) {
             SlaveControlClient.this.loader.setMasterConnected(true);
             SlaveControlClient.this.subscribe();
-            LOGGER.info("[icbm-slave] master 已连接: {}", serverId);
+            LOGGER.debug("[icbm-slave] master 已连接: {}", serverId);
         }
 
         @Override

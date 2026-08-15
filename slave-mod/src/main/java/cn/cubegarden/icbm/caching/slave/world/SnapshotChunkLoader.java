@@ -78,23 +78,35 @@ public final class SnapshotChunkLoader {
         if (loaded == null) {
             return false;
         }
+        // section 级遍历（26.3 LevelChunkSection.getBlockState(x,y,z) 相对坐标，免 BlockPos
+        // 构造——原实现每刷新构造 98304 个 BlockPos 并两次全局定位，主线程开销大）；
+        // 差异才构造绝对 BlockPos 并广播 UPDATE_CLIENTS（追踪玩家即时看到新状态——8.1 提交
+        // 说明声称已改 UPDATE_CLIENTS，但实现遗留 UPDATE_NONE 只改服务端不通知客户端，
+        // 真机表现为“同步慢/被拒预测不恢复”；逐方块广播会刷爆网络，差异广播成本与变更数成正比）。
+        net.minecraft.world.level.chunk.LevelChunkSection[] freshSections = fresh.getSections();
+        net.minecraft.world.level.chunk.LevelChunkSection[] loadedSections = loaded.getSections();
+        int minSectionY = level.getMinSectionY();
         int minX = pos.getMinBlockX();
         int minZ = pos.getMinBlockZ();
-        for (int y = level.getMinY(); y < level.getMaxY(); y++) {
-            for (int z = 0; z < 16; z++) {
-                for (int x = 0; x < 16; x++) {
-                    net.minecraft.core.BlockPos blockPos =
-                            new net.minecraft.core.BlockPos(minX + x, y, minZ + z);
-                    BlockState state = fresh.getBlockState(blockPos);
-                    BlockState current = loaded.getBlockState(blockPos);
-                    if (state != current) {
-                        loaded.setBlockState(blockPos, state,
-                                net.minecraft.world.level.block.Block.UPDATE_NONE);
+        for (int si = 0; si < freshSections.length && si < loadedSections.length; si++) {
+            net.minecraft.world.level.chunk.LevelChunkSection fs = freshSections[si];
+            net.minecraft.world.level.chunk.LevelChunkSection ls = loadedSections[si];
+            int sectionBaseY = (minSectionY + si) << 4;
+            for (int y = 0; y < 16; y++) {
+                int absY = sectionBaseY + y;
+                for (int z = 0; z < 16; z++) {
+                    for (int x = 0; x < 16; x++) {
+                        BlockState state = fs.getBlockState(x, y, z);
+                        if (state == ls.getBlockState(x, y, z)) {
+                            continue;
+                        }
+                        loaded.setBlockState(new net.minecraft.core.BlockPos(minX + x, absY, minZ + z),
+                                state, net.minecraft.world.level.block.Block.UPDATE_CLIENTS);
                     }
                 }
             }
         }
-        LOGGER.info("[icbm-slave] 区块刷新: 已就地应用快照 {},{}（UPDATE_CLIENTS）", pos.x(), pos.z());
+        LOGGER.debug("[icbm-slave] 区块刷新: 已就地应用快照 {},{}（差异广播）", pos.x(), pos.z());
         return true;
     }
 
