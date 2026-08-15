@@ -11,11 +11,12 @@
   角色 SOURCE/SLAVE、HELLO serverName、封装通道线上布局、LOGIN_VERIFY 系列消息）。
 - [HIERARCHY.md](HIERARCHY.md)：master/slave 拓扑、认证断言（Auth Gateway 归 master）与
   异步控制平面。
-- [PHASES.md](PHASES.md)：按验收条件组织的阶段性任务（阶段1 架构修正：单端口封装通道 +
-  backend/slave 双模组）。
+- [PHASES.md](PHASES.md)：阶段性任务与验收条件（当前阶段 8：游戏内功能完善——真实玩家操作
+  接线 + 快照覆盖扩容；阶段 0-7 为已完成记录）。
 - [VERSION_FREEZE.md](VERSION_FREEZE.md)：26.3 版本与指纹冻结清单（唯一来源）。
 - [PARITY.md](PARITY.md)：与原版行为的一致性/有意差异记录。
-- [EXECUTION_PLAN.md](EXECUTION_PLAN.md)：阶段1 落地执行计划与里程碑进度。
+- [EXECUTION_PLAN.md](EXECUTION_PLAN.md)：阶段1 架构修正落地执行计划（里程碑 0-7 全部完成，
+  存档；遗留开放项已并入 PHASES.md 阶段 8）。
 
 ## 已确认的前提
 

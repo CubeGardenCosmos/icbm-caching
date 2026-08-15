@@ -98,16 +98,21 @@ slave 就停止将旧对象作为新会话基线。slave 落后、断线或无�
   PSK 内网信任边界（运维手册禁止弱公共密码）；不使用 TLS。
 - master/slave 的私钥、master 票据签名密钥和缓存对象签名密钥应分离，并支持 keyId 轮换。
 
-## 7. 需要验证的安全性质
+## 7. 安全性质（已验证，阶段 1/3 验收 + 端到端复验）
 
-- [ ] 玩家只能经 slave 进入；直接连接 master 的任何流量被 RST。
-- [ ] 不知道公共密码的连接无法完成封装握手；畸形/原版握手被 RST。
-- [ ] 同一玩家无法同时在多个 slave 建立会话（全局会话记账）。
-- [ ] 身份票据不能重放、跨地区转用或在过期后使用。
-- [ ] slave A 不能伪造 master 对 slave B 的身份或缓存更新。
-- [ ] master 断线或撤销身份后，现有 slave 会话按策略失效并注销记账。
-- [ ] 任意缓存或身份通道故障时，不会错误放行未验证玩家或过期区块。
-- [ ] 源服数据包缓存不会把未验证/过期数据作为基线（fail closed）。
+- 玩家只能经 slave 进入；直接连接 master 的任何流量被 RST（封装通道 magic 判别，畸形/原版
+  握手 RST，SO_LINGER=0）。
+- 不知道公共密码的连接无法完成封装握手；AUTH 失败即断连（EncapsulatedControlServerTest 锁定）。
+- 同一玩家无法同时在多个 slave 建立会话（SessionRegistry 全局记账：重复会话拒新/踢旧/断开注销）。
+- 身份票据不能重放、跨地区转用或在过期后使用（TicketVault 单次兑换 + nonce 重放拒 + 吊销）。
+- slave A 不能伪造 master 对 slave B 的身份或缓存更新（封装通道会话密钥按 UUID+连接 nonce
+  派生，PeerRegistry 角色绑定）。
+- master 断线或撤销身份后，现有 slave 会话按策略失效并注销记账（SESSION_CLOSED + 连接断开
+  批量注销，防会话表泄漏）。
+- 任意缓存或身份通道故障时，不会错误放行未验证玩家或过期区块（ServeGate/SnapshotChunkLoader
+  fail closed：未命中/落后/epoch 不匹配/master 断开均拒绝服务）。
+- 源服数据包缓存不会把未验证/过期数据作为基线（对象库 committed+epoch 单调守卫，PacketLog
+  仅审计不参与基线判定）。
 
 ## 8. 参考
 
