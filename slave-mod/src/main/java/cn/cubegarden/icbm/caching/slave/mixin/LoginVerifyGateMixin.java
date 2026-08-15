@@ -128,13 +128,11 @@ public abstract class LoginVerifyGateMixin {
             this.connection.setEncryptionKey(decryptCipher, encryptCipher);
             Messages.MasterVerifiedIdentity identity = res.identity();
             UUID uuid = uuidFromBytes(identity.playerUuid());
-            GameProfile profile = new GameProfile(uuid, this.requestedUsername);
-            for (Messages.ProfileProperty property : identity.profileProperties()) {
-                // 26.3 authlib 10.0.76：GameProfile 为 record，properties() 访问
-                profile.properties().put(property.name(),
-                        new com.mojang.authlib.properties.Property(
-                                property.name(), property.value(), property.signature()));
-            }
+            // authlib 10.0.76：PropertyMap 构造即封装为 ImmutableMultimap（不可变，put 抛
+            // UnsupportedOperationException）；GameProfile(UUID,String) 用 PropertyMap.EMPTY。
+            // 正确做法：先用 guava 构建，再以三参构造组装（纹理属性供玩家列表皮肤）
+            GameProfile profile = cn.cubegarden.icbm.caching.slave.network.LoginProfileBuilder
+                    .build(uuid, this.requestedUsername, identity.profileProperties());
             this.startClientVerification(profile); // 官方流程继续（VERIFYING → 配置阶段）
             LOGGER.info("[icbm-slave] 登录验证通过: {} session={}", profile.name(), identity.sessionId());
             SlaveRuntime runtime = SlaveRuntime.current();
