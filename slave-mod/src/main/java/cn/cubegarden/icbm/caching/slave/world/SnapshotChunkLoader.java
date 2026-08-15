@@ -66,8 +66,9 @@ public final class SnapshotChunkLoader {
      * （flags=UPDATE_CLIENTS：变更广播给追踪玩家——阶段 8.1 修复原 UPDATE_NONE 只改服务端
      * 不通知客户端，真实玩家会保留被拒/过期的预测）。slave 装载 committed snapshot 语义——
      * 非世界计算/非写回；区块实体由 setBlockState 自动增删（LevelChunk.java:322/346 对照）。
-     * 卸载路径（SnapshotReloader）因引用不降 0（玩家在 chunk 内）卡住时的兜底与 RESYNC 路径。
-     * 在 Server thread 调用。返回 true 表示已应用；false = 无新快照/装载失败（保持现状）。
+     * 已装载区块一律就地刷新（卸载重载路径已移除：玩家 ticket 使引用不降 0，卸载永不
+     * 完成）；RESYNC（操作被拒）也走此路径。在 Server thread 调用。返回 true 表示已应用；
+     * false = 无新快照/装载失败（保持现状）。
      */
     public boolean refreshLoaded(ServerLevel level, ChunkPos pos) {
         ChunkAccess fresh = this.loadChunk(level, pos);
