@@ -141,9 +141,15 @@ def _ensure_jre() -> None:
 
 
 def _ensure_master_runtime() -> None:
-    """master 运行产物：gradlew installDist（application 插件完整 runtime classpath）。"""
+    """master 运行产物：gradlew installDist（application 插件完整 runtime classpath）。
+
+    产物过期（velocity-plugin 源码/构建脚本新于产物 lib jar）时重新 installDist：
+    否则提交后的协议/路由变更不会进入运行中的 master —— 真机日志实例：slave 8.2
+    的 CHUNK_MATERIALIZE_REQ(0x1B) 被 8.1 master 判 unknown messageType → 断开重连
+    循环，物化请求到不了源服，玩家操作全部 chunk-not-loaded 被拒。
+    """
     dist = paths.VELOCITY_PLUGIN / "build" / "install" / "icbm-velocity-plugin"
-    if (dist / "bin" / "icbm-velocity-plugin").exists():
+    if not _master_runtime_stale(dist):
         return
     from . import jdk
 
@@ -155,6 +161,32 @@ def _ensure_master_runtime() -> None:
         cwd=str(paths.VELOCITY_PLUGIN),
         env=env,
     )
+
+
+def _master_runtime_stale(dist: Path) -> bool:
+    """installDist 产物缺失或旧于 velocity-plugin 源码/构建脚本 → 需要重新构建。"""
+    if not (dist / "bin" / "icbm-velocity-plugin").exists():
+        return True
+    jars = list((dist / "lib").glob("icbm-velocity-plugin-*.jar"))
+    if not jars:
+        return True
+    dist_mtime = max(j.stat().st_mtime for j in jars)
+    return _newest_mtime(paths.VELOCITY_PLUGIN) > dist_mtime
+
+
+def _newest_mtime(root: Path) -> float:
+    """递归最新 mtime（排除 build/.gradle/run——产物目录不参与过期判定）。"""
+    import os as _os
+
+    latest = 0.0
+    for dirpath, dirnames, filenames in _os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ("build", ".gradle", "run")]
+        for fn in filenames:
+            try:
+                latest = max(latest, _os.path.getmtime(_os.path.join(dirpath, fn)))
+            except OSError:
+                pass
+    return latest
 
 
 def _load_or_create_identity() -> dict[str, str]:
