@@ -25,3 +25,4 @@
 | 19 | 未命中区块的可达性 | vanilla 未生成区块可进入（按需生成） | slave 未命中区块撞墙（fail closed），物化请求（CHUNK_MATERIALIZE_REQ）经 master 路由源服生成后装载；源服不可达时保持撞墙 | 项目扩展 | 阶段 8.2；PlayerBounds + MaterializeRequester |
 | 20 | 物化 ticket 生命周期 | /forceload 永久强制加载 | 生成 + 快照发布后即释放（GENERATING→PUBLISHING→移除 状态机，超时保护） | 项目扩展 | 阶段 8.2；MaterializeService |
 | 21 | 生成期脏标记跟踪 | ProtoChunk 生成期 markUnsaved（ProtoChunk.java:228）不面向保存调度 | 不跟踪 ProtoChunk；物化完成（FULL）显式 mark 一次进入快照管道 | 一致（快照语义等价） | 阶段 8.2；草稿 on-demand-materialization §3.3 |
+| 22 | 操作目标区块未加载 | vanilla 玩家在线时目标区块必在内存（玩家周边加载） | 源服无玩家：物化 ticket 释放后区块卸载；操作裁决遇未加载区块 → setChunkForced 加载重试（NeedsChunk，上限 400t=20s，加载完成后同 tick 裁决），超时仍拒绝 chunk-not-loaded（fail closed） | 项目扩展（操作管道） | 阶段 8.3；OperationQueue + OperationAdjudicator；真机日志 21:35 全部操作被拒归因 |

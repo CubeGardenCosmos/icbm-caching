@@ -68,13 +68,19 @@ public final class OperationAdjudicator implements cn.cubegarden.icbm.caching.so
     }
 
     /** 裁决结果：成功（canonical state + 新 revision）或失败原因。 */
-    public sealed interface Result permits Committed, Rejected {
+    public sealed interface Result permits Committed, Rejected, NeedsChunk {
     }
 
     public record Committed(String canonicalState, long chunkRevision, long epoch) implements Result {
     }
 
     public record Rejected(String reason) implements Result {
+    }
+
+    /** 目标区块未加载：由队列 setChunkForced 加载后重试（不直接拒绝；源服是唯一权威，
+     *  必须在内存区块上裁决）。物化 ticket 已释放的区块在源服会卸载（无玩家），
+     *  玩家操作到达时按需重新加载（真机日志：物化发布后全部 chunk-not-loaded）。 */
+    public record NeedsChunk(int chunkX, int chunkZ) implements Result {
     }
 
     /** 执行裁决（Server thread）。preconditions 为 slave 提交的目标状态哈希；未命中 → Rejected。 */
@@ -87,7 +93,9 @@ public final class OperationAdjudicator implements cn.cubegarden.icbm.caching.so
         }
         net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(op.posX(), op.posY(), op.posZ());
         if (!level.isLoaded(pos)) {
-            return new Rejected("chunk-not-loaded");
+            // 区块未加载（物化 ticket 已释放/从未生成）：请求加载后重试裁决——不得在
+            // 不确定基线上拒绝或猜测。加载由队列 setChunkForced 发起（主线程）。
+            return new NeedsChunk(Math.floorDiv(op.posX(), 16), Math.floorDiv(op.posZ(), 16));
         }
         BlockState authority = level.getBlockState(pos);
         if (op.preconditions() != null && !op.preconditions().isEmpty()

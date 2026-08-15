@@ -161,6 +161,57 @@ class OperationQueueTest {
     }
 
     @Test
+    void needsChunkRetriesThenCommits() {
+        // 目标区块未加载：第一次 NeedsChunk（排队重试），加载完成后第二次裁决成功 →
+        // 终态 COMMITTED（不再直接 chunk-not-loaded 拒绝——玩家操作不因物化 ticket
+        // 释放而全部失败，真机日志修复目标）
+        RecordingAdjudicator adjudicator = new RecordingAdjudicator();
+        adjudicator.results.add(new OperationAdjudicator.NeedsChunk(0, 4));
+        adjudicator.results.add(new OperationAdjudicator.Committed("minecraft:diamond_block", 5, 1));
+        RecordingSender sender = new RecordingSender();
+        OperationQueue queue = new OperationQueue(adjudicator, sender);
+        Messages.SubmitOperation op = op("00000000-0000-0000-0000-000000000007", 10);
+        queue.enqueue(op);
+
+        queue.onEndServerTick(null); // NeedsChunk → 重入队（retry=1）
+        assertEquals(Messages.OperationStatusRes.OperationStatus.PENDING,
+                queue.query(new Messages.GetOperationStatus(op.operationId())).status(),
+                "区块加载中保持 PENDING（不产生错误终态）");
+        queue.onEndServerTick(null); // 第二次：Committed
+
+        assertEquals(Messages.OperationStatusRes.OperationStatus.COMMITTED,
+                queue.query(new Messages.GetOperationStatus(op.operationId())).status());
+        assertEquals(2, adjudicator.calls.size(), "NeedsChunk 后必须重试裁决（不吞操作）");
+        assertEquals(1, sender.sent.size());
+        assertTrue(sender.sent.get(0).startsWith("OPERATION_COMMITTED"),
+                "只回发一个终态（重试过程不产生中间终态）");
+    }
+
+    @Test
+    void needsChunkTimeoutRejectsFailClosed() {
+        // 区块加载迟迟不完成（物化失败等）：超时后拒绝（fail closed，不无限驻留）
+        RecordingAdjudicator adjudicator = new RecordingAdjudicator();
+        for (int i = 0; i < OperationQueue.MAX_CHUNK_RETRY_TICKS + 2; i++) {
+            adjudicator.results.add(new OperationAdjudicator.NeedsChunk(0, 4)); // 一直未加载
+        }
+        RecordingSender sender = new RecordingSender();
+        OperationQueue queue = new OperationQueue(adjudicator, sender);
+        Messages.SubmitOperation op = op("00000000-0000-0000-0000-000000000008", 10);
+        queue.enqueue(op);
+
+        for (int i = 0; i < OperationQueue.MAX_CHUNK_RETRY_TICKS + 2; i++) {
+            queue.onEndServerTick(null);
+        }
+
+        Messages.OperationStatusRes res = queue.query(new Messages.GetOperationStatus(op.operationId()));
+        assertEquals(Messages.OperationStatusRes.OperationStatus.REJECTED, res.status());
+        assertEquals("chunk-not-loaded", res.rejectReason());
+        assertEquals(OperationQueue.MAX_CHUNK_RETRY_TICKS + 1, adjudicator.calls.size(),
+                "重试至上限后拒绝（第 MAX+1 次裁决触发超时终态）");
+        assertTrue(sender.sent.get(sender.sent.size() - 1).startsWith("OPERATION_REJECTED"));
+    }
+
+    @Test
     void historyIsBounded() {
         RecordingAdjudicator adjudicator = new RecordingAdjudicator();
         OperationQueue queue = new OperationQueue(adjudicator, new RecordingSender());
