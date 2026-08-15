@@ -18,6 +18,25 @@ slave↔master 使用**单端口封装通道**（master 只监听一个端口，
 - PSK 内网信任边界：知道公共密码者可读取/伪造封装流量（运维手册禁止弱公共密码，
   UUID 仅身份标签与审计）。
 
+### 1.1 封装通道线上布局（golden 测试锁定，草稿 `build/workspace/draft/encapsulated-channel`）
+
+   明文层（握手期）：[magic "ICBM"(4)][length(4 大端)][payload]
+     payload = AUTH / AUTH_ACK（仅握手期明文）
+
+   加密层（ACTIVE 后）：[magic "ICBM"(4)][length(4 大端，= ciphertext 长)][ciphertext]
+     ciphertext = ChaCha20-Poly1305([streamId(1)][body]，AAD=magic‖length)
+     streamId：CONTROL(0) / LOGIN_VERIFY(1) / MC_PASSTHROUGH(2)
+     body（CONTROL）= 下述包络体；body（MC_PASSTHROUGH）= [流序号(8)][长度(4)][明文 MC 报文字节]
+
+- AUTH：`[authTokenLen(2)=16][authToken(16)][uuid(16)][clientNonce(16)]`，
+  `authToken = HMAC-SHA256(公共密码, "ICBM-AUTH" ‖ uuid ‖ clientNonce)` 前 16 字节；
+- AUTH_ACK：`[accepted(1)][serverNonce(16)][reason(2+utf8)]`，accepted=false 后 master 立即关闭；
+- 会话密钥：`sessionKey = HKDF-SHA256(公共密码, salt=clientNonce‖serverNonce‖uuid,
+  info="icbm-session")` 派生为两个 32 字节方向密钥；nonce = 8 字节大端帧计数器 + 4 字节
+  方向常量（client→server=1 / server→client=2），双向密钥不同 ⇒ nonce 永不碰撞；
+- 帧长度上限 `MAX_ENCAPSULATED_FRAME_BYTES`（硬上限，超限/负长度 → RST，防放大攻击）；
+- 连接首字节非 magic（原版握手/畸形/扫描）→ master 立即 RST（SO_LINGER=0，不读剩余数据）。
+
 源服↔master 使用 **velocity 授信模式**（modern forwarding secret，内网，master 主动连接），
 不经封装通道；承载快照/失效/epoch/操作终态消息事件（无玩家在线时也可用）。
 

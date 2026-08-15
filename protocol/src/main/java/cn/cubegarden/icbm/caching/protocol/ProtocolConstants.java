@@ -35,6 +35,31 @@ public final class ProtocolConstants {
     /** HELLO 握手超时（毫秒）。 */
     public static final long HELLO_TIMEOUT_MILLIS = 10_000;
 
+    /** 封装通道（CACHE_PROTOCOL §1，草稿 encapsulated-channel §3.1）常量。 */
+    /** AUTH 证明 token 长度（HMAC-SHA256 前 16 字节）。 */
+    public static final int AUTH_TOKEN_BYTES = 16;
+
+    /** UUID / nonce / sharedSecret 定长 16 字节。 */
+    public static final int UUID_BYTES = 16;
+
+    /** ChaCha20-Poly1305 nonce 长度（JDK 固定 12 字节）。 */
+    public static final int CHACHA_NONCE_BYTES = 12;
+
+    /** ChaCha20-Poly1305 AEAD tag 长度（JDK 固定 16 字节）。 */
+    public static final int CHACHA_TAG_BYTES = 16;
+
+    /** 会话密钥长度（HKDF-SHA256 输出 32 字节）。 */
+    public static final int SESSION_KEY_BYTES = 32;
+
+    /** 封装帧长度硬上限（控制帧 body 上限 + 流头 + AEAD tag 余量）。 */
+    public static final int MAX_ENCAPSULATED_FRAME_BYTES = MAX_FRAME_HARD_LIMIT + 1 + CHACHA_TAG_BYTES + 64;
+
+    /** HKDF 派生用途（info 参数，见草稿 encapsulated-channel §3.1）。 */
+    public static final String HKDF_INFO_SESSION = "icbm-session";
+
+    /** AUTH 证明用途（HMAC 消息前缀，见草稿 encapsulated-channel §3.1）。 */
+    public static final String AUTH_MESSAGE_PREFIX = "ICBM-AUTH";
+
     /** 快照格式（CACHE_PROTOCOL PUT_SNAPSHOT.snapshotFormat）。 */
     public static final String SNAPSHOT_FORMAT_NBT_CHUNK_V1 = "NBT_CHUNK_V1";
 

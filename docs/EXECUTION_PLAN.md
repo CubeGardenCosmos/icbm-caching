@@ -20,12 +20,12 @@
 
 - [x] 草稿 `draft/encapsulated-channel/`：参考仓库做法（Velocity 的 Connection/帧/握手）、官方做法
       （minecraft-assets 的帧与包层）、差异取舍（magic/RST/PSK 鉴权/ChaCha20-Poly1305）。
-- [ ] 封装层（protocol 模块新增，两侧复用）：
+- [x] 封装层（protocol 模块新增，两侧复用）：
       - 帧：magic + 长度 + 载荷；连接首字节非 magic → master RST（SO_LINGER=0）；
       - 握手：AUTH（公共密码证明 + UUID 明文 + nonce/challenge）→ 会话密钥派生（含 UUID，
-        建议 HKDF）→ ChaCha20-Poly1305（JDK `Cipher`，无外部依赖）；
+        HKDF-SHA256）→ ChaCha20-Poly1305（JDK `Cipher`，无外部依赖）；
       - 多路复用：消息类型 + 流 ID（控制流 / 验证流 / 明文 MC 报文流）；
-      - golden 序列化测试锁定线上布局。
+      - golden 序列化测试锁定线上布局（AUTH token RFC 5869/HMAC 向量、帧布局、篡改检测、RST）。
 - [x] 角色重定义：SOURCE / SLAVE（迁移 VIRTUAL_BACKEND/VELOCITY）；HELLO 增加 serverName。
 - [x] 新消息：LOGIN_VERIFY_REQ/RES、SESSION_CLOSED（CACHE_PROTOCOL §9）+ codec + golden 测试。
 - [ ] 缓存键扩展：serverName 进入（对象库目录结构按 serverName 分域）。
