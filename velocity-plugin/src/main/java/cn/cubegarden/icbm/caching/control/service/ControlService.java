@@ -159,6 +159,25 @@ public final class ControlService implements AutoCloseable {
 
     // ---- 乐观操作（里程碑 7 阶段 5；裁决在源服主线程，master 纯转发） ----
 
+    /** 按需物化（8.2）：slave 请求生成目标 chunk → 转发源服；源未连接/发送失败 →
+     *  即时应答 REJECTED（fail closed，slave 保持撞墙；生成结果经既有快照管道回流）。 */
+    public void onChunkMaterializeReq(ControlSession session, Messages.ChunkMaterializeReq msg) {
+        session.requireSlaveRole();
+        cn.cubegarden.icbm.caching.control.net.SourceConnector source = this.sourceConnector;
+        boolean accepted = source != null && source.connected();
+        if (!accepted) {
+            LOGGER.warn("[control] 物化请求拒绝（源服未连接，fail closed）: req={} {} {},{}",
+                    msg.requestId(), msg.dimension(), msg.chunkX(), msg.chunkZ());
+        } else {
+            accepted = source.send(MessageType.CHUNK_MATERIALIZE_REQ, 0,
+                    encodeBody(MessageType.CHUNK_MATERIALIZE_REQ, msg));
+        }
+        session.send(MessageType.CHUNK_MATERIALIZE_RES, 0,
+                encodeBody(MessageType.CHUNK_MATERIALIZE_RES,
+                        new Messages.ChunkMaterializeRes(msg.requestId(), accepted,
+                                accepted ? "" : "source-unavailable")));
+    }
+
     /** SUBMIT_OPERATION：slave 提交 → 转发源服裁决（源服唯一权威）；记录路由供终态回发。 */
     public void onSubmitOperation(ControlSession session, Messages.SubmitOperation msg) {
         session.requireSlaveRole();

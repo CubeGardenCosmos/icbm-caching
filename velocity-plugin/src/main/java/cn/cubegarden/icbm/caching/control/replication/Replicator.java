@@ -199,9 +199,19 @@ public final class Replicator {
                         event.chunk().z(), event.revision(), InvalidateReason.UNKNOWN);
             }
             case SNAPSHOT_COMMITTED -> {
-                byte[] payload = this.store.loadCommittedPayload(event.chunk());
+                // 8.2 重放缺陷修复：必须按事件 revision 取 payload（loadPayload），不能用
+                // loadCommittedPayload（当前最新）配旧事件的 event.payloadHash() —— 旧 hash 配
+                // 新 payload → slave REJECTED_HASH_MISMATCH 风暴，只有恰好等于最新 revision 的
+                // 事件能推送成功。对象库每 revision payload 均落盘（CACHE_PROTOCOL §2）。
+                SnapshotObjectStore.Payload payload = this.store.loadPayload(event.chunk(), event.revision());
                 if (payload == null) {
-                    LOGGER.error("[control] 推送失败：对象缺失 {} rev={}", event.chunk(), event.revision());
+                    LOGGER.error("[control] 推送失败：对象缺失 {} rev={}（fail closed，不推旧 hash 新 payload）",
+                            event.chunk(), event.revision());
+                    return;
+                }
+                if (!payload.payloadHash().equals(event.payloadHash())) {
+                    LOGGER.error("[control] 推送失败：对象哈希与事件不符 {} rev={}（对象库损坏，fail closed）",
+                            event.chunk(), event.revision());
                     return;
                 }
                 type = MessageType.SNAPSHOT_PUSH;
@@ -209,8 +219,8 @@ public final class Replicator {
                         event.dimension(), event.chunk().x(), event.chunk().z(), event.revision(),
                         ProtocolConstants.SNAPSHOT_FORMAT_NBT_CHUNK_V1,
                         ProtocolConstants.COMPRESSION_GZIP,
-                        this.store.committedUncompressedLength(event.chunk()),
-                        event.payloadHash(), payload
+                        payload.uncompressedLength(),
+                        payload.payloadHash(), payload.bytes()
                 ));
             }
             default -> {

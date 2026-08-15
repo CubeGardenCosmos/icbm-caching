@@ -22,3 +22,6 @@
 | 16 | 方向性放置状态 | vanilla BlockItem.place 用 getStateForPlacement（玩家朝向/waterlogged） | v1 用 defaultBlockState（如楼梯恒朝北）；客户端以回显更新校正 | 有意差异 | 阶段 8.1；草稿 real-player-operations §5 待办 |
 | 17 | 容器/双格/门/床放置 | vanilla BlockItem.place 处理块实体建置与 setPlacedBy、双格结构 placeAt | v1 拒绝（complex-placement-block：hasBlockEntity/DoublePlantBlock/DoorBlock/BedBlock，源服同判定） | 阶段限制 | 阶段 8.1；防权威世界畸形（setBlock 只放半格/空 BE） |
 | 18 | 放置音效 | vanilla place 触发音效 | v1 无音效 | 阶段限制 | 阶段 8.1 |
+| 19 | 未命中区块的可达性 | vanilla 未生成区块可进入（按需生成） | slave 未命中区块撞墙（fail closed），物化请求（CHUNK_MATERIALIZE_REQ）经 master 路由源服生成后装载；源服不可达时保持撞墙 | 项目扩展 | 阶段 8.2；PlayerBounds + MaterializeRequester |
+| 20 | 物化 ticket 生命周期 | /forceload 永久强制加载 | 生成 + 快照发布后即释放（GENERATING→PUBLISHING→移除 状态机，超时保护） | 项目扩展 | 阶段 8.2；MaterializeService |
+| 21 | 生成期脏标记跟踪 | ProtoChunk 生成期 markUnsaved（ProtoChunk.java:228）不面向保存调度 | 不跟踪 ProtoChunk；物化完成（FULL）显式 mark 一次进入快照管道 | 一致（快照语义等价） | 阶段 8.2；草稿 on-demand-materialization §3.3 |

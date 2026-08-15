@@ -37,6 +37,11 @@ public abstract class PlayerBoundsMixin {
         double targetX = packet.getX(this.player.getX());
         double targetZ = packet.getZ(this.player.getZ());
         if (!runtime.playerBounds().canEnter(targetX, targetZ)) {
+            // 8.2 按需物化：撞墙时请求目标区块生成（节流/去重/冷却由请求器保证；
+            // 目标区块随后经 SNAPSHOT_PUSH 装载，玩家可继续前进）
+            runtime.materializeRequester().onBlockedMove(
+                    Math.floorDiv((int) Math.floor(targetX), 16),
+                    Math.floorDiv((int) Math.floor(targetZ), 16));
             this.teleport(this.player.getX(), this.player.getY(), this.player.getZ(),
                     this.player.getYRot(), this.player.getXRot());
             ci.cancel();

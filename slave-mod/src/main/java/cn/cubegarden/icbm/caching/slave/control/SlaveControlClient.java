@@ -219,6 +219,17 @@ public final class SlaveControlClient implements AutoCloseable {
                         new Messages.GetOperationStatus(operationId)));
     }
 
+    /** 按需物化请求（8.2）：请求 master 路由源服生成并发布目标 chunk。 */
+    public boolean requestMaterialize(Messages.ChunkMaterializeReq req) {
+        return this.channel.send(MessageType.CHUNK_MATERIALIZE_REQ, this.requestIds.incrementAndGet(), 0,
+                EncapsulatedChannelClient.encode(MessageType.CHUNK_MATERIALIZE_REQ, req));
+    }
+
+    /** 下一条 requestId（物化/操作等请求消息用；channel 发送处自增，此处仅分配）。 */
+    public long nextRequestId() {
+        return this.requestIds.incrementAndGet();
+    }
+
     /** 等待首轮初始同步（master 连接 + WORLD_EPOCH/首个快照到达）。Server thread 在
      *  装载 spawn 区块前调用：ServeGate 语义要求先同步基线再服务区块（未同步 → 装载
      *  命中空 EMPTY，之后无官方重载 API）。超时返回 false（不阻断启动，区块装载可能
@@ -358,6 +369,8 @@ public final class SlaveControlClient implements AutoCloseable {
                             EncapsulatedChannelClient.decode(MessageType.OPERATION_REJECTED, body));
                     case OPERATION_STATUS_RES -> SlaveControlClient.this.notifyStatusRes(
                             EncapsulatedChannelClient.decode(MessageType.OPERATION_STATUS_RES, body));
+                    case CHUNK_MATERIALIZE_RES -> SlaveControlClient.this.handleMaterializeRes(
+                            EncapsulatedChannelClient.decode(MessageType.CHUNK_MATERIALIZE_RES, body));
                     case HEARTBEAT -> SlaveControlClient.this.ack(envelope.sequence());
                     case ERROR -> LOGGER.error("[icbm-slave] master 错误: {}",
                             EncapsulatedChannelClient.<Messages.ErrorMessage>decode(MessageType.ERROR, body).reason());
@@ -396,6 +409,17 @@ public final class SlaveControlClient implements AutoCloseable {
         } else {
             LOGGER.warn("[icbm-slave] OPERATION_STATUS_RES 无回调（overlay 未装配）: op={}",
                     java.util.HexFormat.of().formatHex(res.operationId()));
+        }
+    }
+
+    /** CHUNK_MATERIALIZE_RES：master 即时应答。accepted=false → 源服不可达（fail closed，
+     *  请求器冷却后由下一次撞墙/预取重试；不风暴）。 */
+    private void handleMaterializeRes(Messages.ChunkMaterializeRes res) {
+        if (!res.accepted()) {
+            LOGGER.warn("[icbm-slave] 物化请求被拒（源服不可达，保持撞墙 fail closed）: "
+                    + "req={} reason={}", res.requestId(), res.reason());
+        } else {
+            LOGGER.debug("[icbm-slave] 物化请求已受理: req={}", res.requestId());
         }
     }
 

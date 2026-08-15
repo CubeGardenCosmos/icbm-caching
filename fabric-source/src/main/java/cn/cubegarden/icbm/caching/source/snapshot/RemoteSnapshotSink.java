@@ -306,6 +306,17 @@ public final class RemoteSnapshotSink implements SnapshotSink {
                             cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.encode(
                                     MessageType.OPERATION_STATUS_RES, res));
                 }
+            } else if (type == MessageType.CHUNK_MATERIALIZE_REQ) {
+                // 8.2 按需物化：slave 请求 → 源服主线程生成并发布（结果经快照管道回流）
+                cn.cubegarden.icbm.caching.source.SourceRuntime runtime =
+                        cn.cubegarden.icbm.caching.source.SourceRuntime.current();
+                if (runtime != null) {
+                    runtime.materialize().requestFromChannel(
+                            cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.decode(
+                                    MessageType.CHUNK_MATERIALIZE_REQ, body));
+                } else {
+                    LOGGER.error("[icbm-source] 物化请求丢弃（运行时未装配，fail closed）");
+                }
             }
         }
 

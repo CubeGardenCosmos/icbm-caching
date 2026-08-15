@@ -58,6 +58,10 @@ public final class SnapshotObjectStore implements AutoCloseable {
         }
     }
 
+    /** 指定 revision 的对象内容（Replicator 重放按事件 revision 取 payload 用）。 */
+    public record Payload(long revision, String payloadHash, int uncompressedLength, byte[] bytes) {
+    }
+
     /** resolve 结果（对应 RESOLVE_CHUNK_RES 字段）。 */
     public record ResolveResult(
             Status status, long committedRevision, String objectId, String objectHash
@@ -322,6 +326,29 @@ public final class SnapshotObjectStore implements AutoCloseable {
         Path file = chunkDir(key).resolve(Long.toString(current.committed())).resolve(SNAPSHOT_FILE);
         try {
             return Files.readAllBytes(file);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 读取指定 revision 的对象 payload（Replicator 重放 SNAPSHOT_COMMITTED 事件用：事件携带
+     * 事件时刻的 revision 与 payloadHash，必须取同一 revision 的 payload 与 metadata，否则
+     * 旧 hash 配新 payload → slave REJECTED_HASH_MISMATCH——8.2 重放缺陷修复）。
+     * metadata 缺失 / 文件缺失 / metadata.revision 与请求不符 → null（fail closed，不猜测）。
+     */
+    public Payload loadPayload(ChunkRef key, long revision) {
+        if (revision <= 0) {
+            return null;
+        }
+        Path revisionDir = chunkDir(key).resolve(Long.toString(revision));
+        Metadata meta = readMetadata(revisionDir.resolve(METADATA_FILE));
+        if (meta == null || meta.revision() != revision) {
+            return null;
+        }
+        try {
+            byte[] bytes = Files.readAllBytes(revisionDir.resolve(SNAPSHOT_FILE));
+            return new Payload(meta.revision(), meta.payloadHash(), meta.uncompressedLength(), bytes);
         } catch (IOException e) {
             return null;
         }

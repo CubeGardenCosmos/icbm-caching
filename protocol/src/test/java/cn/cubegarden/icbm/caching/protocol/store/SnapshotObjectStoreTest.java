@@ -1,6 +1,7 @@
 package cn.cubegarden.icbm.caching.protocol.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -78,6 +79,36 @@ class SnapshotObjectStoreTest {
         assertEquals(ResolveResult.Status.HIT, result.status());
         assertEquals(7, result.committedRevision());
         assertFalse(result.objectHash().isEmpty());
+    }
+
+    /** 8.2 重放修复：loadPayload 按事件 revision 取 payload（旧 revision 不被最新覆盖）。 */
+    @Test
+    void loadPayloadReturnsExactRevisionNotLatest() throws Exception {
+        byte[] data7 = gzipPayload("data-7");
+        byte[] data8 = gzipPayload("data-8");
+        this.store.raiseRequired(KEY, 7);
+        assertEquals(PutResult.OK, this.put(7, 1, data7));
+        this.store.commit(KEY, 7);
+        this.store.raiseRequired(KEY, 8);
+        assertEquals(PutResult.OK, this.put(8, 1, data8));
+        this.store.commit(KEY, 8);
+
+        SnapshotObjectStore.Payload p7 = this.store.loadPayload(KEY, 7);
+        assertNotNull(p7);
+        assertEquals(7, p7.revision());
+        assertEquals(sha(data7), p7.payloadHash());
+        assertEquals(decompressedLength(data7), p7.uncompressedLength());
+        assertArrayEquals(data7, p7.bytes());
+
+        SnapshotObjectStore.Payload p8 = this.store.loadPayload(KEY, 8);
+        assertNotNull(p8);
+        assertEquals(8, p8.revision());
+        assertArrayEquals(data8, p8.bytes());
+
+        // 未存在 revision / 非法参数 → null（fail closed）
+        assertNull(this.store.loadPayload(KEY, 6));
+        assertNull(this.store.loadPayload(KEY, 0));
+        assertNull(this.store.loadPayload(KEY, -1));
     }
 
     @Test

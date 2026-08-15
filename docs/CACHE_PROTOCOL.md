@@ -228,6 +228,27 @@ slave 侧：可丢弃 overlay（内存 Map，不落盘、不写 committed snapsh
 显示旧状态即与源一致）；每玩家每 chunk 单 pending（相交操作排队）。新快照到达时若区块已装载，
 slave 触发刷新（卸载重载 / 就地应用快照）——不展示旧区块（里程碑 7 修复里程碑 6 限制）。
 
+### CHUNK_MATERIALIZE_REQ / CHUNK_MATERIALIZE_RES（阶段 8.2 新增，按需物化）
+
+slave 玩家接近服务边界（未命中/落后/epoch 不匹配的区块不可进入）或预取时，请求源服生成并发布
+目标区块：slave → master → source 单跳转发，源服生成结果经既有快照管道（PUT_SNAPSHOT → 对象库
+→ SNAPSHOT_PUSH）回流，无需显式完成回执。
+
+    CHUNK_MATERIALIZE_REQ(0x1B)   slave → master → source
+        requestId(8) / dimensionId / chunkX / chunkZ
+        priority(1): LOW=0 | NORMAL=1 | HIGH=2
+        reason(1):    PLAYER_PROXIMITY=0 | PREFETCH=1
+
+    CHUNK_MATERIALIZE_RES(0x1C)   master → slave 即时应答
+        requestId(8) / accepted(1) / reason
+
+路由与失败语义：master 校验 slave 角色后转发源服（SourceConnector）；源未连接/发送失败 →
+RES(accepted=false, reason="source-unavailable")（fail closed，slave 保持撞墙，冷却后由下一次
+撞墙/预取重试）。源服侧去重由物化 pending 集合保证（重复 REQ 幂等）。生成完成（FULL）→ 脏标记
+→ 快照管道 → 发布后释放物化 ticket（不永久驻留）；slave 侧节流：同 chunk 冷却（默认 5s）、
+PLAYER_PROXIMITY 每 tick 限量、周期预取（PREFETCH）。源服每 tick 限量 addTicket（默认 8），
+防快速移动引发生成风暴阻塞源服主线程。
+
 ## 4. 管理与复制（阶段2 新增）
 
 ### ADMIN_INVALIDATE

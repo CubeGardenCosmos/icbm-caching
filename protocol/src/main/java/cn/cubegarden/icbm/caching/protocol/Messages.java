@@ -209,6 +209,73 @@ public final class Messages {
     public record SessionClosed(byte[] playerUuid, String sessionId, String reason) {
     }
 
+    /** 物化请求类型（按需物化；slave→master→source 单跳转发，源服生成结果经既有快照管道回流）。 */
+    public enum MaterializeReason {
+        PLAYER_PROXIMITY(0),
+        PREFETCH(1);
+
+        private final int id;
+
+        MaterializeReason(int id) {
+            this.id = id;
+        }
+
+        public int id() {
+            return this.id;
+        }
+
+        /** 未知类型返回 null（调用方必须拒绝，不猜测）。 */
+        public static MaterializeReason fromId(int id) {
+            for (MaterializeReason reason : values()) {
+                if (reason.id == id) {
+                    return reason;
+                }
+            }
+            return null;
+        }
+    }
+
+    /** 物化优先级（低/普通/高；源服每 tick 限量处理时按优先级入队）。 */
+    public enum MaterializePriority {
+        LOW(0),
+        NORMAL(1),
+        HIGH(2);
+
+        private final int id;
+
+        MaterializePriority(int id) {
+            this.id = id;
+        }
+
+        public int id() {
+            return this.id;
+        }
+
+        public static MaterializePriority fromId(int id) {
+            for (MaterializePriority priority : values()) {
+                if (priority.id == id) {
+                    return priority;
+                }
+            }
+            return null;
+        }
+    }
+
+    /** CHUNK_MATERIALIZE_REQ：slave 请求源服生成并发布目标 chunk（玩家接近服务边界/预取）。 */
+    public record ChunkMaterializeReq(
+            long requestId,
+            DimensionRef dimension,
+            int chunkX,
+            int chunkZ,
+            MaterializePriority priority,
+            MaterializeReason reason
+    ) {
+    }
+
+    /** CHUNK_MATERIALIZE_RES：master 即时应答（accepted=false → 源未连接/不可达，slave 保持撞墙）。 */
+    public record ChunkMaterializeRes(long requestId, boolean accepted, String reason) {
+    }
+
     /** 乐观操作类型（阶段 5 白名单：仅 BREAK/PLACE；其余类型 slave 直接拒绝，不发提交）。 */
     public enum OperationType {
         BREAK(0),

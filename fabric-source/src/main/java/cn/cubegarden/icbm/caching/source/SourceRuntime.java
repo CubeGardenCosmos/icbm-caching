@@ -19,7 +19,8 @@ public record SourceRuntime(
         DirtyTracker tracker,
         SnapshotPublisher publisher,
         ChunkSnapshotTicker ticker,
-        cn.cubegarden.icbm.caching.source.operation.OperationQueue operationQueue
+        cn.cubegarden.icbm.caching.source.operation.OperationQueue operationQueue,
+        cn.cubegarden.icbm.caching.source.materialize.MaterializeService materialize
 ) {
 
     private static volatile SourceRuntime INSTANCE;

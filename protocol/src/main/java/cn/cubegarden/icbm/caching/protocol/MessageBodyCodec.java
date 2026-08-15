@@ -466,6 +466,47 @@ public final class MessageBodyCodec {
                         baseRevision, preconditions, placeState, sentAt);
             }
         });
+        register(MessageType.CHUNK_MATERIALIZE_REQ, new Codec<Messages.ChunkMaterializeReq>() {
+            @Override
+            public void encode(DataOutput out, Messages.ChunkMaterializeReq value) throws IOException {
+                out.writeLong(value.requestId());
+                writeDimension(out, value.dimension());
+                out.writeInt(value.chunkX());
+                out.writeInt(value.chunkZ());
+                out.writeByte(value.priority().id());
+                out.writeByte(value.reason().id());
+            }
+
+            @Override
+            public Messages.ChunkMaterializeReq decode(DataInput in) throws IOException {
+                long requestId = in.readLong();
+                DimensionRef dimension = readDimension(in);
+                int chunkX = in.readInt();
+                int chunkZ = in.readInt();
+                Messages.MaterializePriority priority = Messages.MaterializePriority.fromId(in.readUnsignedByte());
+                if (priority == null) {
+                    throw new IOException("unknown materialize priority");
+                }
+                Messages.MaterializeReason reason = Messages.MaterializeReason.fromId(in.readUnsignedByte());
+                if (reason == null) {
+                    throw new IOException("unknown materialize reason");
+                }
+                return new Messages.ChunkMaterializeReq(requestId, dimension, chunkX, chunkZ, priority, reason);
+            }
+        });
+        register(MessageType.CHUNK_MATERIALIZE_RES, new Codec<Messages.ChunkMaterializeRes>() {
+            @Override
+            public void encode(DataOutput out, Messages.ChunkMaterializeRes value) throws IOException {
+                out.writeLong(value.requestId());
+                out.writeBoolean(value.accepted());
+                writeString(out, value.reason());
+            }
+
+            @Override
+            public Messages.ChunkMaterializeRes decode(DataInput in) throws IOException {
+                return new Messages.ChunkMaterializeRes(in.readLong(), in.readBoolean(), readString(in));
+            }
+        });
         register(MessageType.OPERATION_COMMITTED, new Codec<Messages.OperationCommitted>() {
             @Override
             public void encode(DataOutput out, Messages.OperationCommitted value) throws IOException {

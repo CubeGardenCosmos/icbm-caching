@@ -132,12 +132,21 @@ public final class SlaveMod implements ModInitializer {
         });
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(
                 tickServer -> reloader.onServerTick(tickServer));
+        // 8.2 按需物化：撞墙/预取请求（节流/去重/冷却；源服生成 → 快照 → slave 装载）
+        cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester =
+                new cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester(client, loader);
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(
+                tickServer -> {
+                    if (tickServer.overworld() != null) {
+                        materializeRequester.onEndServerTick(tickServer.overworld());
+                    }
+                });
         // bmtool debug 状态提示（/bmtool debug toggle 开启后 action bar 输出性能/通讯/UUID）
         cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay =
                 new cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay(client, config.uuidHex());
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(debugOverlay::onServerTick);
         SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,
-                overlay, operationHandler, config.brand(), debugOverlay);
+                overlay, operationHandler, materializeRequester, config.brand(), debugOverlay);
         SlaveRuntime.install(runtime);
         client.start();
         // 初始同步闸门：装载 spawn 区块前等基线（WORLD_EPOCH/快照）；超时不阻断（fail closed）

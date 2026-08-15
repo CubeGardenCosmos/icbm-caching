@@ -91,23 +91,30 @@
 （pendingInChunk）、PlayerOperationHandlerTest（哈希已知向量）、全组件测试绿；真机闭环验收
 归入 8.3。
 
-### 8.2 快照覆盖扩容（修复"只能加载 1 个区块"）
+### 8.2 快照覆盖扩容（修复"只能加载 1 个区块"）——已完成
 
-- [ ] 修复 master 重放推送缺陷（Replicator.java:202）：SNAPSHOT_COMMITTED 重放改为按事件 revision
-      取 payload（对象库新增 loadPayload(key, revision)；每 revision payload 已落盘）或按 chunk
-      合并为仅推送最终 committed 对象；消除 slave REJECTED_HASH_MISMATCH 风暴，区块 bootstrap
-      恢复。附回归测试：多 revision 重放后 slave 对象库 committed 水位与 master 一致。
-- [ ] 源服初始区域物化：配置（如 `icbm.materialize.initialRadius`，默认 4-8）→ 源服启动时对
-      出生点周边 addTicket 生成并发布快照（玩家首会话即有可探索区域）；生成期脏标记覆盖确认
-      （ProtoChunk 生成期 markUnsaved 是否纳入跟踪，ChunkAccessMixin 扩展 + 测试）。
-- [ ] 按需物化协议流（协议变更：docs/CACHE_PROTOCOL.md + 两侧 codec + golden 同一提交）：
-      CHUNK_MATERIALIZE_REQ/RES —— slave 玩家接近服务边界 → 请求目标 chunk（requestId/
-      dimensionId/chunkX/chunkZ/priority/reason=PLAYER_PROXIMITY|PREFETCH）→ master 路由源服
-      （源未连接/断路器 OPEN → REJECTED，slave 保持撞墙 fail closed）→ 源服 addTicket 生成 →
-      生成完成 markUnsaved → 快照管道 → master 对象库 → SNAPSHOT_PUSH → slave 装载。
-- [ ] 物化节流与去重：每 tick 限量、请求去重/冷却、玩家行进方向视距内预取（批量 PREFETCH）；
-      防快速移动引发生成风暴（源服主线程热路径不受阻塞）。
-- [ ] 装载后清理：源服物化 ticket 在区块生成并快照后释放（不永久驻留）；slave 注入即释放不变
+- [x] 修复 master 重放推送缺陷（Replicator.java writeEvent SNAPSHOT_COMMITTED 分支）：对象库新增
+      `loadPayload(key, revision)` 按事件 revision 取 payload（每 revision payload 已落盘），
+      hash/uncompressedLength 取自该 revision metadata 并与事件 hash 交叉核对（不一致 → 不发，
+      fail closed）；消除 slave REJECTED_HASH_MISMATCH 风暴，区块 bootstrap 恢复。回归测试
+      `ReplicatorReplayTest`：源服提交 rev1+rev2 → slave 断线重连订阅 → 两个 SNAPSHOT_PUSH 的
+      hash 与各自 payload 匹配（旧实现会旧 hash 配新 payload），slave 对象库 committed 水位与
+      master 一致（2==2）。
+- [x] 源服初始区域物化：配置 `icbm.materialize.initialRadius`（默认 4，0 关闭）→ SERVER_STARTED
+      时对出生点周边 radius² 区块 setChunkForced 生成并发布快照（玩家首会话即有可探索区域）；
+      已生成焦点区块显式 mark 发布（生成期 ProtoChunk markUnsaved 不跟踪——物化完成=FULL 生成
+      完成，显式 mark 一次即可，草稿 §3.3 论证）。
+- [x] 按需物化协议流（docs/CACHE_PROTOCOL.md + 两侧 codec + golden 同一提交）：
+      CHUNK_MATERIALIZE_REQ(0x1B)/RES(0x1C) —— slave 玩家接近服务边界（PlayerBoundsMixin 撞墙
+      → onBlockedMove）→ REQ(requestId/dimension/chunkX/chunkZ/priority/reason=
+      PLAYER_PROXIMITY|PREFETCH) → master 路由源服（slave 角色校验；源未连接/发送失败 →
+      RES(accepted=false)，slave 保持撞墙 fail closed）→ 源服 MaterializeService 主线程
+      setChunkForced 生成 → 完成 mark 脏 → 快照管道 → master 对象库 → SNAPSHOT_PUSH → slave 装载。
+- [x] 物化节流与去重：slave MaterializeRequester 同 chunk 冷却（5s）/PLAYER_PROXIMITY 每 tick
+      限量（4）/周期预取（2s，半径 2，批量 PREFETCH）；源服每 tick 限量 addTicket（8）——快速
+      移动不会引发生成风暴（源服主线程热路径不受阻塞）。
+- [x] 装载后清理：源服物化 ticket（setChunkForced）在区块生成且 revision 发布后释放
+      （GENERATING→PUBLISHING→移除 显式状态机，超时保护不永久驻留）；slave 注入即释放不变
       （256M 约束）。
 
 ### 8.3 验证与收尾（吸收原阶段 2/6/7 开放项）

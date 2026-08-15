@@ -24,6 +24,7 @@ public final class SlaveRuntime {
     private final PlayerBounds playerBounds;
     private final cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay;
     private final cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler operationHandler;
+    private final cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester;
     private final String brand;
     private final cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay;
 
@@ -32,6 +33,7 @@ public final class SlaveRuntime {
                          PlayerBounds playerBounds,
                          cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay,
                          cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler operationHandler,
+                         cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester,
                          String brand,
                          cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay) {
         this.client = client;
@@ -41,6 +43,7 @@ public final class SlaveRuntime {
         this.playerBounds = playerBounds;
         this.overlay = overlay;
         this.operationHandler = operationHandler;
+        this.materializeRequester = materializeRequester;
         this.brand = brand;
         this.debugOverlay = debugOverlay;
     }
@@ -50,10 +53,11 @@ public final class SlaveRuntime {
                                       PlayerBounds playerBounds,
                                       cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay,
                                       cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler operationHandler,
+                                      cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester,
                                       String brand,
                                       cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay) {
         return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds, overlay,
-                operationHandler, brand, debugOverlay);
+                operationHandler, materializeRequester, brand, debugOverlay);
     }
 
     public static void install(SlaveRuntime runtime) {
@@ -96,6 +100,11 @@ public final class SlaveRuntime {
     /** 真实玩家操作接线（阶段 8.1；SpectateGateMixin 路由互动包到操作管道）。 */
     public cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler operationHandler() {
         return this.operationHandler;
+    }
+
+    /** 按需物化请求器（8.2；PlayerBoundsMixin 撞墙触发 + 周期预取）。 */
+    public cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester() {
+        return this.materializeRequester;
     }
 
     /** 服务器品牌（F3 Brand，MinecraftServer.getServerModName 覆盖值）。 */

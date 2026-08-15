@@ -127,7 +127,10 @@ class FrameCodecTest {
                 new Messages.OperationStatusRes(new byte[16],
                         Messages.OperationStatusRes.OperationStatus.COMMITTED,
                         "minecraft:diamond_block", 6, "", dim,
-                        new int[0], new int[0])
+                        new int[0], new int[0]),
+                new Messages.ChunkMaterializeReq(77, dim, 3, -1,
+                        Messages.MaterializePriority.HIGH, Messages.MaterializeReason.PLAYER_PROXIMITY),
+                new Messages.ChunkMaterializeRes(77, true, "")
         };
         MessageType[] types = new MessageType[] {
                 MessageType.HELLO, MessageType.HELLO_ACK, MessageType.WORLD_EPOCH,
@@ -140,7 +143,8 @@ class FrameCodecTest {
                 MessageType.LOGIN_KEY_RES, MessageType.SESSION_CLOSED,
                 MessageType.SUBMIT_OPERATION, MessageType.OPERATION_COMMITTED,
                 MessageType.OPERATION_REJECTED, MessageType.GET_OPERATION_STATUS,
-                MessageType.OPERATION_STATUS_RES
+                MessageType.OPERATION_STATUS_RES,
+                MessageType.CHUNK_MATERIALIZE_REQ, MessageType.CHUNK_MATERIALIZE_RES
         };
         for (int i = 0; i < samples.length; i++) {
             byte[] body = encodeBody(types[i], samples[i]);

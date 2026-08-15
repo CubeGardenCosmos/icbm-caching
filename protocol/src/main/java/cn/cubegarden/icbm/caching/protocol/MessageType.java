@@ -31,7 +31,9 @@ public enum MessageType {
     GET_OPERATION_STATUS(0x17),
     OPERATION_STATUS_RES(0x18),
     LOGIN_KEY_REQ(0x19),
-    LOGIN_KEY_RES(0x1A);
+    LOGIN_KEY_RES(0x1A),
+    CHUNK_MATERIALIZE_REQ(0x1B),
+    CHUNK_MATERIALIZE_RES(0x1C);
 
     private final byte id;
 

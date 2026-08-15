@@ -24,6 +24,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
@@ -78,7 +79,13 @@ public final class IcbmSource implements ModInitializer {
                                     tracker, service),
                             sink::sendOperationResult);
 
-            SourceRuntime.install(new SourceRuntime(gate, service, tracker, publisher, ticker, operationQueue));
+            // 物化（8.2）：初始区域 + 按需 REQ；每 tick 限量 8 区块（节流）
+            cn.cubegarden.icbm.caching.source.materialize.MaterializeService materialize =
+                    new cn.cubegarden.icbm.caching.source.materialize.MaterializeService(
+                            service, tracker, 8);
+
+            SourceRuntime.install(new SourceRuntime(gate, service, tracker, publisher, ticker,
+                    operationQueue, materialize));
             LOGGER.info("[icbm-source] 运行时就绪：gate={} epoch={} sink={}",
                     gate.isEnabled(), service.epochFor(Level.OVERWORLD.identifier()),
                     sink.getClass().getSimpleName());
@@ -92,6 +99,27 @@ public final class IcbmSource implements ModInitializer {
                 // （否则 rev 快照内容是操作前状态——里程碑 7 e2e 暴露）
                 runtime.operationQueue().onEndServerTick(server);
                 runtime.ticker().onEndServerTick(server);
+                // 物化状态机在 ticker 之后：GENERATING 完成 mark 的 dirty 由下一 tick 发布
+                runtime.materialize().onEndServerTick(server);
+            }
+        });
+        // 3) 初始区域物化（出生点可用后；SERVER_STARTED 早于玩家首个会话）
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            SourceRuntime runtime = SourceRuntime.current();
+            if (runtime == null) {
+                return;
+            }
+            ServerLevel overworld = server.getLevel(Level.OVERWORLD);            if (overworld == null) {
+                return;
+            }
+            net.minecraft.world.level.storage.LevelData.RespawnData respawn = server.getRespawnData();
+            if (respawn == null || respawn.globalPos() == null || respawn.globalPos().pos() == null) {
+                return;
+            }
+            int radius = initialRadius(server);
+            if (radius > 0) {
+                runtime.materialize().materializeInitial(
+                        overworld, respawn.globalPos().pos(), radius);
             }
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
@@ -200,6 +228,27 @@ public final class IcbmSource implements ModInitializer {
     private static Path resolve(net.minecraft.server.MinecraftServer server, String path) {
         Path p = Path.of(path);
         return p.isAbsolute() ? p : server.getWorldPath(LevelResource.ROOT).resolve(p);
+    }
+
+    /** 初始区域物化半径（icbm.materialize.initialRadius，默认 4；0 关闭）。 */
+    private static int initialRadius(net.minecraft.server.MinecraftServer server) {
+        Path configPath = server.getWorldPath(LevelResource.ROOT).resolve("icbm-control.properties");
+        Properties props = new Properties();
+        if (Files.isRegularFile(configPath)) {
+            try (var in = Files.newInputStream(configPath)) {
+                props.load(in);
+            } catch (Exception e) {
+                LOGGER.error("[icbm-source] 读取 icbm-control.properties 失败（物化半径回退默认 4）", e);
+            }
+        }
+        try {
+            return Math.max(0, Integer.parseInt(
+                    props.getProperty("icbm.materialize.initialRadius", "4").trim()));
+        } catch (NumberFormatException e) {
+            LOGGER.error("[icbm-source] icbm.materialize.initialRadius 非法（回退默认 4）: {}",
+                    props.getProperty("icbm.materialize.initialRadius"));
+            return 4;
+        }
     }
 
     private static String registryFingerprint(net.minecraft.server.MinecraftServer server) {
