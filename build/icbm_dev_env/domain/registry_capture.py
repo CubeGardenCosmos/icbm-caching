@@ -31,7 +31,7 @@ def capture_registry() -> int:
     if not jar.exists():
         raise RuntimeError("转储模组构建产物缺失: " + str(jar))
 
-    mods = paths.SERVER_DIR / "mods"
+    mods = paths.DEBUG_SOURCE / "mods"
     deployed = mods / jar.name
     try:
         shutil.copyfile(jar, deployed)
@@ -70,9 +70,9 @@ def _run_server_with_dump(dump_root: Path) -> None:
     # 启动服务器（后台），等待转储 DONE 后停止
     proc = subprocess.Popen(
         ["java", "-Xmx3G", "-jar", jar.name, "nogui"],
-        cwd=str(paths.SERVER_DIR),
+        cwd=str(paths.DEBUG_SOURCE),
         env=env,
-        stdout=open(paths.SERVER_DIR / "capture-server.log", "w"),
+        stdout=open(paths.DEBUG_SOURCE / "capture-server.log", "w"),
         stderr=subprocess.STDOUT,
     )
     try:
@@ -82,7 +82,7 @@ def _run_server_with_dump(dump_root: Path) -> None:
                 print("[capture] 转储完成")
                 return
             if proc.poll() is not None:
-                tail = (paths.SERVER_DIR / "capture-server.log").read_text()[-2000:]
+                tail = (paths.DEBUG_SOURCE / "capture-server.log").read_text()[-2000:]
                 raise RuntimeError(f"服务器提前退出（exit={proc.returncode}）:\n{tail}")
             time.sleep(1)
         raise RuntimeError("转储超时（300s）")
@@ -94,7 +94,7 @@ def _stop_server(proc: subprocess.Popen) -> None:
     if proc.poll() is None:
         # 通过控制台命令 stop 优雅停止；失败则 kill
         try:
-            with open(paths.SERVER_DIR / "capture-console.in", "w") as fh:
+            with open(paths.DEBUG_SOURCE / "capture-console.in", "w") as fh:
                 pass  # 控制台输入走 stdin，这里仅兜底
         except OSError:
             pass

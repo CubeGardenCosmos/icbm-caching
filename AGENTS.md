@@ -16,13 +16,13 @@
 - 运行 `python3 build/main.py init`（推荐 `uv run build/main.py init`）完成环境就绪，步骤与产物：
   1. 部署 JDK 25（Adoptium 官方源失败自动降级清华 TUNA 镜像）到 `build/workspace/jdk-25`。
   2. 克隆参考仓库（FabricMC/fabric 的 26.3 分支、PaperMC/Velocity master，非子模块）到 `build/workspace/fabric` 与 `build/workspace/velocity`，只读使用。
-  3. 下载并部署测试服务器：Mojang 官方 26.3-snapshot-8 server + Fabric Loader 0.19.3，安装位置 `build/workspace/server`。
+  3. 下载并部署测试服务器：Mojang 官方 26.3-snapshot-8 server + Fabric Loader 0.19.3，安装到 `build/workspace/server/source`（debug 实例根 `build/workspace/server`，见 `debug-run`）。
   4. 用 Vineflower 反编译 Mojang 官方 26.3-snapshot-8 服务端 jar（官方 mojmap，无需 yarn/intermediary）到 `build/workspace/minecraft-assets`，只作行为分析参考；不得把 Mojang/Fabric/Velocity 源码、注释或资源复制进本仓库。
   5. 运行 `fabric-source` 的 `./gradlew build` 预热编译缓存（成败不阻断）。
   - init 末尾询问是否安装基础软件（Rust 工具链、Node、pi AI 工具）。
 - Python 工具由 uv 管理（`build/pyproject.toml`、`build/uv.lock`）；功能按分层拆分在 `build/icbm_dev_env/` 包内（入口 → 编排 → 领域功能 → 基础设施），`build/main.py` 只做 uv 自举与 CLI 分发，禁止向 `main.py` 堆逻辑。
 - 所有联网操作（git/urllib/Gradle/curl）遵循 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量；Gradle 步骤由脚本翻译为 JVM 代理参数。
-- 测试服务器：`build/main.py server` 启动 `build/workspace/server` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source/slave-mod）；`build/main.py control` 前台启动 master 控制服务（单端口封装通道 11420，PSK 与 UUID 角色绑定由 `build/main.py control` 生成到 `build/workspace/control-run/control.properties`；不使用 mTLS/证书）；`build/main.py slave` 启动 slave 服务器（`build/workspace/slave-server`，256M 堆）；`build/main.py e2e` 端到端验证（源服 setblock → 快照 → master → slave → RCON 玩家视角 + 乐观操作闭环（slave RCON BREAK → 源服裁决 → 快照 → slave 刷新 → 玩家视角）+ fail closed，三个真实 Java 进程）。
+- 测试服务器：`build/main.py server` 启动 `build/workspace/server/source` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source/slave-mod）；`build/main.py control` 前台启动 master 控制服务（单端口封装通道 11420，PSK 与 UUID 角色绑定由 `build/main.py control` 生成到 `build/workspace/control-run/control.properties`；不使用 mTLS/证书）；`build/main.py slave` 启动 slave 服务器（`build/workspace/server/slave`，256M 堆）；`build/main.py debug-run` 启动交互式 debug 实例（`build/workspace/server` 下 source/master/slave 三个子文件夹 + jre；curses TUI 三窗口，Shift+Tab 切换焦点、Ctrl-C 退出；slave 监听 0.0.0.0:25565、区域 `icbm:lan`；配置由 python 运行时覆盖：正版验证/创造模式/32 视距，源服每次以 `level-type=minecraft:normal` + 固定 seed 重置世界，master/slave 状态同步重置）；`build/main.py e2e` 端到端验证（源服 setblock → 快照 → master → slave → RCON 玩家视角 + 乐观操作闭环（slave RCON BREAK → 源服裁决 → 快照 → slave 刷新 → 玩家视角）+ fail closed，三个真实 Java 进程）。
 - 环境重置与清理：`reinit`（删除 `build/workspace` 后重新完整部署，适合反编译结果被污染时）与 `cleanup`（删除 `build/workspace` 与各组件构建产物，腾出硬盘空间）均为破坏性操作，脚本会先请求确认。
 - `build/workspace/`、`build/.venv/`、各组件 `build/`、`.gradle/`、`run/` 目录被 Git 忽略。
 - 开发环境改动（如升级 Loom/Gradle/JDK 版本）需同步更新 `docs/VERSION_FREEZE.md`、`build/` 脚本与本文档。
@@ -61,13 +61,13 @@
       管理源服务器并产生消息事件：脏标记、快照、revision、主线程裁决；连接层用 velocity 授信模式）。
   - `slave-mod/`：slave Fabric 模组后端（原生 MC 服务器进程上接管游戏事件，只实现协议与部分预测，
       不做世界计算；256M JVM / 磁盘缓存约束；封装通道客户端；区块注入 scheduleChunkLoad/applyStep、
-      移动边界、旁观互动拒绝、禁持久化、LOGIN_VERIFY 递交）。
+      移动边界、旁观互动拒绝、禁持久化、登录握手透传（RSA 在 master，LOGIN_VERIFY/KEY 两阶段递交）。
   - `velocity-plugin/`：master 统筹中心 Velocity 插件（包 `cn.cubegarden.icbm.caching.velocity`；单端口封装通道服务、
       落点判定/切换、会话记账联动、健康检查）。
   - `virtual-backend/`：阶段3 已实现的独立 26.3 旁观会话后端（包 `cn.cubegarden.icbm.caching.virtual`）；
       修正后作为 slave-mod 的技术基础（只读变体参考；Nbt/对象库/ServeGate 逻辑迁移入 slave-mod）。
   - `control-service/`：已并入 master（包 `cn.cubegarden.icbm.caching.control` 位于 `velocity-plugin/`；对象库/事件日志/订阅逻辑为 master 内部模块，无独立监听端口；封装通道服务由 master 提供）。
-  - `auth-gateway/`：Mojang 正版验证组件（归 master 受信面：master 内实现验证 + 全局会话记账 +
+  - `auth-gateway/`：Mojang 正版验证组件（归 master 受信面：master 借 Mojang authlib 官方实现验证（RSA 握手在 master）+ 全局会话记账 +
       断言签名 + 票据单次兑换 + 落点判定 + 权威会话桥（McPassthroughBridge/PacketLog））。
   - `protocol/`：跨组件共享控制协议（包 `cn.cubegarden.icbm.caching.protocol`，纯 Java 25，netty/slf4j 由消费方提供；含包络/消息编解码、SnapshotObjectStore、ControlChannel 客户端基类）。
   - `docs/`：设计与协议文档；`build/`：Python 开发环境工具。

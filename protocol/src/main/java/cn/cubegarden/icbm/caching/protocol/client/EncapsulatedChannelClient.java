@@ -79,8 +79,9 @@ public class EncapsulatedChannelClient implements AutoCloseable {
         default void onMessage(MessageType type, Envelope envelope, byte[] body) {
         }
 
-        /** LOGIN_VERIFY 流（streamId=1）：master 回 LOGIN_VERIFY_RES 原始 body（无包络）。 */
-        default void onLoginVerifyResponse(byte[] body) {
+        /** LOGIN_VERIFY 流（streamId=1）：master 回执原始 body（[type(1)][消息体]，
+         *  CACHE_PROTOCOL §1.1；type=LOGIN_VERIFY_RES(0x12)/LOGIN_KEY_RES(0x1A)）。 */
+        default void onLoginVerifyResponse(MessageType type, byte[] body) {
         }
 
         /** MC_PASSTHROUGH 流（streamId=2，权威会话）：对端明文 MC 报文原始 body
@@ -353,7 +354,14 @@ public class EncapsulatedChannelClient implements AutoCloseable {
                         Envelope envelope = FrameCodec.decodeFrame(decrypted.body());
                         this.listener.onMessage(envelope.messageType(), envelope, envelope.body());
                     }
-                    case LOGIN_VERIFY -> this.listener.onLoginVerifyResponse(decrypted.body());
+                    case LOGIN_VERIFY -> {
+                        byte[] payload = decrypted.body();
+                        if (payload.length < 1) {
+                            throw new IOException("LOGIN_VERIFY 流空载荷");
+                        }
+                        this.listener.onLoginVerifyResponse(
+                                MessageType.fromId(payload[0]), java.util.Arrays.copyOfRange(payload, 1, payload.length));
+                    }
                     case MC_PASSTHROUGH -> this.listener.onMcPacket(decrypted.body());
                 }
             }
@@ -447,15 +455,18 @@ public class EncapsulatedChannelClient implements AutoCloseable {
         }
     }
 
-    /** 发送 LOGIN_VERIFY 流（streamId=1）原始 body（无包络；登录验证材料递交）。 */
-    public boolean sendLoginVerify(byte[] body) {
+    /** 发送 LOGIN_VERIFY 流（streamId=1）消息（[type(1)][消息体]；登录握手材料递交/回执）。 */
+    public boolean sendLoginVerify(MessageType type, byte[] body) {
         DataOutputStream out = this.out;
         if (out == null || !this.isConnected() || this.encryptCipher == null) {
             return false;
         }
         try {
+            byte[] payload = new byte[1 + body.length];
+            payload[0] = type.id();
+            System.arraycopy(body, 0, payload, 1, body.length);
             synchronized (out) {
-                byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.LOGIN_VERIFY, body);
+                byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.LOGIN_VERIFY, payload);
                 out.write(frame);
                 out.flush();
             }

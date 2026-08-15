@@ -24,12 +24,14 @@ public final class SlaveRuntime {
     private final PlayerBounds playerBounds;
     private final cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay;
     private final String brand;
+    private final cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay;
 
     private SlaveRuntime(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
                          SpawnRegistry spawnRegistry, LoginVerifyGate loginVerifyGate,
                          PlayerBounds playerBounds,
                          cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay,
-                         String brand) {
+                         String brand,
+                         cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay) {
         this.client = client;
         this.chunkLoader = chunkLoader;
         this.spawnRegistry = spawnRegistry;
@@ -37,14 +39,16 @@ public final class SlaveRuntime {
         this.playerBounds = playerBounds;
         this.overlay = overlay;
         this.brand = brand;
+        this.debugOverlay = debugOverlay;
     }
 
     public static SlaveRuntime create(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
                                       SpawnRegistry spawnRegistry, LoginVerifyGate loginVerifyGate,
                                       PlayerBounds playerBounds,
                                       cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay,
-                                      String brand) {
-        return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds, overlay, brand);
+                                      String brand,
+                                      cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay) {
+        return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds, overlay, brand, debugOverlay);
     }
 
     public static void install(SlaveRuntime runtime) {
@@ -87,5 +91,10 @@ public final class SlaveRuntime {
     /** 服务器品牌（F3 Brand，MinecraftServer.getServerModName 覆盖值）。 */
     public String brand() {
         return this.brand;
+    }
+
+    /** 调试提示 overlay（/bmtool debug toggle；未装配时为 null）。 */
+    public cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay() {
+        return this.debugOverlay;
     }
 }

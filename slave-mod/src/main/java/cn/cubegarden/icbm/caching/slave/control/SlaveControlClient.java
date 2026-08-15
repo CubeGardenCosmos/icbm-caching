@@ -55,7 +55,7 @@ public final class SlaveControlClient implements AutoCloseable {
     private int receivedSinceAck;
     private final Object verifyLock = new Object();
     private CountDownLatch verifyPending;
-    private Messages.LoginVerifyRes verifyResult;
+    private Object verifyResult;
     private volatile OperationListener operationListener;
     private volatile cn.cubegarden.icbm.caching.slave.world.SnapshotReloader snapshotReloader;
     /** 断线清理回调（A8 审计修复：fail closed——断线后不得展示不确定的 overlay 预测）。 */
@@ -108,14 +108,15 @@ public final class SlaveControlClient implements AutoCloseable {
     }
 
     /**
-     * 登录验证：递交材料（LOGIN_VERIFY_REQ）并阻塞等 master RES（超时/断连 → null，拒登录）。
-     * 在登录验证线程调用（不阻塞主线程 tick）。
+     * 登录阶段 A：递交登录开始（LOGIN_VERIFY_REQ）并阻塞等 master 挑战（LOGIN_VERIFY_RES
+     * ok=true 附 challenge + master 公钥；slave 构造 ClientboundHelloPacket 发客户端）。
+     * 在登录验证线程调用（不阻塞主线程 tick）；null/超时 → 拒登录。
      */
-    public Messages.LoginVerifyRes verifyLogin(Messages.LoginVerifyReq req) {
+    public Messages.LoginVerifyRes requestChallenge(Messages.LoginVerifyReq req) {
         CountDownLatch latch;
         synchronized (this.verifyLock) {
-            if (!this.channel.sendLoginVerify(EncapsulatedChannelClient.encode(
-                    MessageType.LOGIN_VERIFY_REQ, req))) {
+            if (!this.channel.sendLoginVerify(MessageType.LOGIN_VERIFY_REQ,
+                    EncapsulatedChannelClient.encode(MessageType.LOGIN_VERIFY_REQ, req))) {
                 return null; // 未连接：无法证明身份 → 拒登录
             }
             this.verifyResult = null;
@@ -127,7 +128,35 @@ public final class SlaveControlClient implements AutoCloseable {
                 LOGGER.error("[icbm-slave] LOGIN_VERIFY 超时（fail closed，拒登录）");
                 return null;
             }
-            return this.verifyResult;
+            return (Messages.LoginVerifyRes) this.verifyResult;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    /**
+     * 登录阶段 B：递交客户端加密响应（LOGIN_KEY_REQ）并阻塞等 master 回执（LOGIN_KEY_RES
+     * verified=true 附会话密钥 sharedSecret + 身份断言；slave 以 sharedSecret 建 Cipher 解密
+     * 客户端报文并继续原版流程）。
+     */
+    public Messages.LoginKeyRes submitKey(Messages.LoginKeyReq req) {
+        CountDownLatch latch;
+        synchronized (this.verifyLock) {
+            if (!this.channel.sendLoginVerify(MessageType.LOGIN_KEY_REQ,
+                    EncapsulatedChannelClient.encode(MessageType.LOGIN_KEY_REQ, req))) {
+                return null;
+            }
+            this.verifyResult = null;
+            this.verifyPending = new CountDownLatch(1);
+            latch = this.verifyPending;
+        }
+        try {
+            if (!latch.await(15, TimeUnit.SECONDS)) {
+                LOGGER.error("[icbm-slave] LOGIN_KEY 超时（fail closed，拒登录）");
+                return null;
+            }
+            return (Messages.LoginKeyRes) this.verifyResult;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return null;
@@ -298,13 +327,17 @@ public final class SlaveControlClient implements AutoCloseable {
         }
 
         @Override
-        public void onLoginVerifyResponse(byte[] body) {
+        public void onLoginVerifyResponse(MessageType type, byte[] body) {
             try {
-                Messages.LoginVerifyRes res = EncapsulatedChannelClient.decode(
-                        MessageType.LOGIN_VERIFY_RES, body);
-                SlaveControlClient.this.wakeVerify(res);
+                if (type == MessageType.LOGIN_KEY_RES) {
+                    SlaveControlClient.this.wakeVerify(EncapsulatedChannelClient.decode(
+                            MessageType.LOGIN_KEY_RES, body));
+                } else {
+                    SlaveControlClient.this.wakeVerify(EncapsulatedChannelClient.decode(
+                            MessageType.LOGIN_VERIFY_RES, body));
+                }
             } catch (Exception e) {
-                LOGGER.error("[icbm-slave] LOGIN_VERIFY_RES 解码失败（fail closed，拒登录）: {}", e.toString());
+                LOGGER.error("[icbm-slave] LOGIN 回执解码失败（fail closed，拒登录）: {}", e.toString());
                 SlaveControlClient.this.wakeVerify(null);
             }
         }
@@ -366,7 +399,7 @@ public final class SlaveControlClient implements AutoCloseable {
         }
     }
 
-    private void wakeVerify(Messages.LoginVerifyRes res) {
+    private void wakeVerify(Object res) {
         CountDownLatch latch;
         synchronized (this.verifyLock) {
             this.verifyResult = res;

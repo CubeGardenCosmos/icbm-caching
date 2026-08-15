@@ -14,8 +14,16 @@ TOOLS_DIR = WORKSPACE / "tools"
 MINECRAFT_ASSETS = WORKSPACE / "minecraft-assets"
 FABRIC_REF = WORKSPACE / "fabric"
 VELOCITY_REF = WORKSPACE / "velocity"
-SERVER_DIR = WORKSPACE / "server"
-SLAVE_SERVER = WORKSPACE / "slave-server"
+
+# debug 实例根（build/workspace/server；三个子文件夹 + jre，见 domain/debug_run.py）
+DEBUG_ROOT = WORKSPACE / "server"
+DEBUG_SOURCE = DEBUG_ROOT / "source"  # 真后端：正常 Minecraft 世界服务器（icbm-source 模组）
+DEBUG_MASTER = DEBUG_ROOT / "master"  # velocity master（ControlServiceMain；封装通道/对象库）
+DEBUG_SLAVE = DEBUG_ROOT / "slave"  # slave 缓存后端（监听 0.0.0.0:25565，区域 icbm:lan）
+DEBUG_JRE = DEBUG_ROOT / "jre"  # JDK 25 运行时（符号链接 → ../jdk-25）
+
+SERVER_DIR = DEBUG_ROOT  # 兼容旧名：现为 debug 实例根（源服目录一律用 DEBUG_SOURCE）
+SLAVE_SERVER = DEBUG_SLAVE  # slave 服务器目录（里程碑6 端到端同用；旧 workspace/slave-server 废弃）
 DRAFT_DIR = WORKSPACE / "draft"
 FINGERPRINTS = WORKSPACE / "fingerprints.json"
 

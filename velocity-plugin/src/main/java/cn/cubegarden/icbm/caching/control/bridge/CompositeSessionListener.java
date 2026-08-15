@@ -18,8 +18,13 @@ public final class CompositeSessionListener implements EncapsulatedControlSessio
     }
 
     @Override
-    public void onLoginVerifyRequest(EncapsulatedControlSession session, byte[] body) {
-        this.authGateway.onLoginVerifyRequest(session, body);
+    public void onLoginVerifyRequest(EncapsulatedControlSession session,
+                                     cn.cubegarden.icbm.caching.protocol.MessageType type, byte[] body) {
+        if (type == cn.cubegarden.icbm.caching.protocol.MessageType.LOGIN_KEY_REQ) {
+            this.authGateway.onLoginKeyRequest(session, body);
+        } else {
+            this.authGateway.onLoginVerifyRequest(session, type, body);
+        }
     }
 
     @Override

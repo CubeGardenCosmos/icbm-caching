@@ -48,8 +48,12 @@ public record ServiceConfig(
      * 放行但仍记账（开发/测试惯例，生产必须 true，运维手册约束）。mojangTimeoutMillis：
      * hasJoined HTTP 超时（超时/不可用 → AuthenticationUnavailable 语义，fail closed 拒绝）。
      * assertionKey：身份断言 HMAC 签名密钥（离线保护；重启后旧断言自然失效，断言短期有效）。
+     * hasJoinedIp：hasJoined 是否带 ip 参数（复刻 26.3 prevent-proxy-connections 语义，
+     * 默认 false = 不带；slave 终止登录时其看到的客户端地址在 localhost/LAN 场景与 Mojang
+     * 会话来源 IP 不一致 → 带 ip 必拒）。
      */
-    public record AuthConfig(boolean verifyMojang, long mojangTimeoutMillis, String assertionKey) {
+    public record AuthConfig(boolean verifyMojang, long mojangTimeoutMillis, String assertionKey,
+                             boolean hasJoinedIp) {
     }
 
     /** 15 参数便捷构造（测试/默认装配）：auth = offline 默认 + 空白名单。 */
@@ -61,7 +65,7 @@ public record ServiceConfig(
         this(host, storeRoot, eventLogPath, maxEventLogEntries, serverId, serverName, psk,
                 encapsulatedPort, roleBindings, backend, maxFrameBytes, pushWindow,
                 heartbeatIntervalMillis, lagThresholdMillis, runtimeProtocol,
-                new AuthConfig(false, 10_000, ""), List.of());
+                new AuthConfig(false, 10_000, "", false), List.of());
     }
 
     public static ServiceConfig defaults(Path root) {
@@ -72,7 +76,7 @@ public record ServiceConfig(
                 new LinkedHashMap<>(), null, 16 * 1024 * 1024,
                 64, 30_000, 90_000,
                 1_073_742_154, // 26.3-snapshot-8 runtime protocol（docs/VERSION_FREEZE.md）
-                new AuthConfig(false, 10_000, ""), List.of()
+                new AuthConfig(false, 10_000, "", false), List.of()
         );
     }
 
@@ -134,7 +138,9 @@ public record ServiceConfig(
                                 Boolean.toString(d.auth().verifyMojang()))),
                         Long.parseLong(props.getProperty("control.auth.mojangTimeoutMillis",
                                 Long.toString(d.auth().mojangTimeoutMillis()))),
-                        assertionKey(props.getProperty("control.auth.assertionKey", d.auth().assertionKey()))),
+                        assertionKey(props.getProperty("control.auth.assertionKey", d.auth().assertionKey())),
+                        Boolean.parseBoolean(props.getProperty("control.auth.hasJoinedIp",
+                                Boolean.toString(d.auth().hasJoinedIp())))),
                 Arrays.stream(props.getProperty("control.allowedServerNames", "").split(","))
                         .map(String::trim).filter(s -> !s.isEmpty()).toList()
         );

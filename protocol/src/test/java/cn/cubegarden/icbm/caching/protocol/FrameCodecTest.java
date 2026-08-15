@@ -104,14 +104,18 @@ class FrameCodecTest {
                 new Messages.AdminInvalidate(dim, "REGION", 0, 0, 1, 1, "admin test"),
                 new Messages.ErrorMessage("bad frame"),
                 new Messages.LoginVerifyReq("Steve", new byte[16],
-                        new Messages.ProfileProperty[] {new Messages.ProfileProperty("textures", "v", "sig")},
-                        "serverHash", new byte[16], "slave-a", "127.0.0.1:50000", new byte[16], 1_700_000_000_000L),
-                new Messages.LoginVerifyRes(true, "", new Messages.MasterVerifiedIdentity(
+                        "slave-a", "127.0.0.1:50000", new byte[16], 1_700_000_000_000L),
+                new Messages.LoginVerifyRes(true, "", new byte[] {1, 2, 3, 4},
+                        new byte[] {48, 92, 48, 13, 6, 9}),
+                Messages.LoginVerifyRes.reject("验证失败"),
+                new Messages.LoginKeyReq(new byte[16], new byte[16], new byte[] {5, 6, 7, 8},
+                        new byte[] {9, 10, 11, 12}),
+                new Messages.LoginKeyRes(true, "", new byte[16], new Messages.MasterVerifiedIdentity(
                         "master", "key-1", "slave-a", new byte[16], "sess-1", new byte[16],
                         1_700_000_100_000L, new byte[] {1, 2, 3},
                         new Messages.ProfileProperty[] {new Messages.ProfileProperty(
                                 "textures", "eyJ0ZXh0dXJlcyI6e30=", "sig")})),
-                new Messages.LoginVerifyRes(false, "验证失败", null),
+                Messages.LoginKeyRes.reject("UNVERIFIED_USERNAME"),
                 new Messages.SessionClosed(new byte[16], "sess-1", "disconnect"),
                 new Messages.SubmitOperation(new byte[16], new byte[16], "sess-1", 7,
                         Messages.OperationType.PLACE, dim, 1, 64, -3, 5,
@@ -132,7 +136,8 @@ class FrameCodecTest {
                 MessageType.SNAPSHOT_PUSH, MessageType.ACK, MessageType.RESYNC_REQ,
                 MessageType.RESYNC_RES, MessageType.HEARTBEAT, MessageType.ADMIN_INVALIDATE,
                 MessageType.ERROR, MessageType.LOGIN_VERIFY_REQ, MessageType.LOGIN_VERIFY_RES,
-                MessageType.LOGIN_VERIFY_RES, MessageType.SESSION_CLOSED,
+                MessageType.LOGIN_VERIFY_RES, MessageType.LOGIN_KEY_REQ, MessageType.LOGIN_KEY_RES,
+                MessageType.LOGIN_KEY_RES, MessageType.SESSION_CLOSED,
                 MessageType.SUBMIT_OPERATION, MessageType.OPERATION_COMMITTED,
                 MessageType.OPERATION_REJECTED, MessageType.GET_OPERATION_STATUS,
                 MessageType.OPERATION_STATUS_RES
@@ -182,12 +187,6 @@ class FrameCodecTest {
         if (expected instanceof Messages.LoginVerifyReq e && actual instanceof Messages.LoginVerifyReq a) {
             assertEquals(e.playerName(), a.playerName());
             assertArrayEquals(e.playerUuid(), a.playerUuid());
-            assertEquals(e.profileProperties().length, a.profileProperties().length);
-            for (int i = 0; i < e.profileProperties().length; i++) {
-                assertEquals(e.profileProperties()[i], a.profileProperties()[i]);
-            }
-            assertEquals(e.serverHash(), a.serverHash());
-            assertArrayEquals(e.sharedSecret(), a.sharedSecret());
             assertEquals(e.slaveId(), a.slaveId());
             assertEquals(e.connectionInfo(), a.connectionInfo());
             assertArrayEquals(e.nonce(), a.nonce());
@@ -195,8 +194,23 @@ class FrameCodecTest {
             return;
         }
         if (expected instanceof Messages.LoginVerifyRes e && actual instanceof Messages.LoginVerifyRes a) {
+            assertEquals(e.ok(), a.ok());
+            assertEquals(e.reason(), a.reason());
+            assertArrayEquals(e.challenge(), a.challenge());
+            assertArrayEquals(e.publicKeyDer(), a.publicKeyDer());
+            return;
+        }
+        if (expected instanceof Messages.LoginKeyReq e && actual instanceof Messages.LoginKeyReq a) {
+            assertArrayEquals(e.playerUuid(), a.playerUuid());
+            assertArrayEquals(e.nonce(), a.nonce());
+            assertArrayEquals(e.keybytes(), a.keybytes());
+            assertArrayEquals(e.encryptedChallenge(), a.encryptedChallenge());
+            return;
+        }
+        if (expected instanceof Messages.LoginKeyRes e && actual instanceof Messages.LoginKeyRes a) {
             assertEquals(e.verified(), a.verified());
             assertEquals(e.reason(), a.reason());
+            assertArrayEquals(e.sharedSecret(), a.sharedSecret());
             if (e.identity() == null) {
                 assertTrue(a.identity() == null);
             } else {

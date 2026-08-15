@@ -149,18 +149,46 @@ public final class Messages {
     public record ProfileProperty(String name, String value, String signature) {
     }
 
-    /** LOGIN_VERIFY_REQ：slave 终止登录握手后把验证材料经封装通道递交给 master（CACHE_PROTOCOL §9）。 */
+    /** LOGIN_VERIFY_REQ（阶段A，slave→master）：登录开始，请求加密握手挑战。
+     *  RSA 密钥对在 master（velocity master 终止登录，slave 只透传握手，CACHE_PROTOCOL §9）；
+     *  profileProperties 不再随请求（由 Mojang hasJoinedServer 结果填充）。 */
     public record LoginVerifyReq(
             String playerName,
             byte[] playerUuid,
-            ProfileProperty[] profileProperties,
-            String serverHash,
-            byte[] sharedSecret,
             String slaveId,
             String connectionInfo,
             byte[] nonce,
             long sentAt
     ) {
+    }
+
+    /** LOGIN_VERIFY_RES（阶段A响应，master→slave）：ok=true 附挑战与 master 公钥（slave 用它
+     *  构造 ClientboundHelloPacket 发客户端，26.3 ServerLoginPacketListenerImpl.java:127）；
+     *  ok=false 附拒绝原因。 */
+    public record LoginVerifyRes(boolean ok, String reason, byte[] challenge, byte[] publicKeyDer) {
+        public static LoginVerifyRes reject(String reason) {
+            return new LoginVerifyRes(false, reason, new byte[0], new byte[0]);
+        }
+    }
+
+    /** LOGIN_KEY_REQ（阶段B，slave→master）：递交客户端加密响应（ServerboundKeyPacket 原样字段：
+     *  keybytes=加密会话密钥，encryptedChallenge=加密挑战；26.3 ServerboundKeyPacket.java 对照）。 */
+    public record LoginKeyReq(
+            byte[] playerUuid,
+            byte[] nonce,
+            byte[] keybytes,
+            byte[] encryptedChallenge
+    ) {
+    }
+
+    /** LOGIN_KEY_RES（阶段B响应，master→slave）：verified=true 附会话密钥（slave 以 AES/CFB8
+     *  建 Cipher 解密客户端报文，Crypt.getCipher 对照）与身份断言（GameProfile 皮肤）；
+     *  verified=false 附拒绝原因。 */
+    public record LoginKeyRes(boolean verified, String reason, byte[] sharedSecret,
+                              MasterVerifiedIdentity identity) {
+        public static LoginKeyRes reject(String reason) {
+            return new LoginKeyRes(false, reason, new byte[0], null);
+        }
     }
 
     /** master 签发的身份断言（LOGIN_VERIFY_RES.VERIFIED 载荷；HIERARCHY §2）。 */
@@ -175,10 +203,6 @@ public final class Messages {
             byte[] signature,
             ProfileProperty[] profileProperties
     ) {
-    }
-
-    /** LOGIN_VERIFY_RES：验证结果（VERIFIED 含断言；REJECTED 含 reason）。 */
-    public record LoginVerifyRes(boolean verified, String reason, MasterVerifiedIdentity identity) {
     }
 
     /** SESSION_CLOSED：slave 上报会话关闭，master 注销记账（防会话表泄漏）。 */

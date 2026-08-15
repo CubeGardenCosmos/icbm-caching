@@ -133,7 +133,12 @@ public final class IcbmSource implements ModInitializer {
         ServerBlockEntityEvents.BLOCK_ENTITY_LOAD.register((blockEntity, level) -> {
             SourceRuntime r = SourceRuntime.current();
             if (r != null) {
-                r.tracker().onChunkLoad(level, level.getChunkAt(blockEntity.getBlockPos()).getPos());
+                // 不调用 level.getChunkAt（主线程阻塞等 chunk 任务会与正在装载的 chunk 状态
+                // 任务互等 → Server Watchdog 60s 判死，crash-reports 验证）；方块实体正被装载
+                // 说明其区块必然已装载，直接由坐标计算区块位置
+                net.minecraft.core.BlockPos pos = blockEntity.getBlockPos();
+                r.tracker().onChunkLoad(level,
+                        new net.minecraft.world.level.ChunkPos(pos.getX() >> 4, pos.getZ() >> 4));
             }
         });
 

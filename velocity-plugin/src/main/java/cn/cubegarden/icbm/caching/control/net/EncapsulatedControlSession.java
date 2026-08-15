@@ -42,9 +42,9 @@ public final class EncapsulatedControlSession implements ControlSessionLogic.Tra
 
     /** 非控制流回调（默认 fail closed；阶段3/5 实现具体处理）。 */
     public interface Listener {
-        /** LOGIN_VERIFY_REQ 原始 body（阶段3 Auth Gateway 实现）。 */
-        default void onLoginVerifyRequest(EncapsulatedControlSession session, byte[] body) {
-            LOGGER.warn("[control] LOGIN_VERIFY 流未服务，关闭会话（阶段3 实现）");
+        /** LOGIN_VERIFY 流消息（[type(1)] 已剥离；type=LOGIN_VERIFY_REQ/LOGIN_KEY_REQ）。 */
+        default void onLoginVerifyRequest(EncapsulatedControlSession session, MessageType type, byte[] body) {
+            LOGGER.warn("[control] LOGIN_VERIFY 流未服务，关闭会话（阶段3 实现）: {}", type);
             session.fail("LOGIN_VERIFY 未服务");
         }
 
@@ -120,10 +120,13 @@ public final class EncapsulatedControlSession implements ControlSessionLogic.Tra
         }
     }
 
-    /** 发送 LOGIN_VERIFY 流（streamId=1）原始 body（无包络；登录验证结果回执）。 */
-    public void sendLoginVerify(byte[] body) {
+    /** 发送 LOGIN_VERIFY 流（streamId=1）消息（[type(1)][消息体]；登录握手回执）。 */
+    public void sendLoginVerify(MessageType type, byte[] body) {
         try {
-            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.LOGIN_VERIFY, body);
+            byte[] payload = new byte[1 + body.length];
+            payload[0] = type.id();
+            System.arraycopy(body, 0, payload, 1, body.length);
+            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encryptCipher, StreamId.LOGIN_VERIFY, payload);
             synchronized (this.out) {
                 this.out.write(frame);
                 this.out.flush();
@@ -154,7 +157,15 @@ public final class EncapsulatedControlSession implements ControlSessionLogic.Tra
                 }
                 switch (decrypted.stream()) {
                     case CONTROL -> this.handleControl(decrypted.body());
-                    case LOGIN_VERIFY -> this.listener.onLoginVerifyRequest(this, decrypted.body());
+                    case LOGIN_VERIFY -> {
+                        byte[] payload = decrypted.body();
+                        if (payload.length < 1) {
+                            this.fail("login verify empty payload");
+                            return;
+                        }
+                        this.listener.onLoginVerifyRequest(this, MessageType.fromId(payload[0]),
+                                java.util.Arrays.copyOfRange(payload, 1, payload.length));
+                    }
                     case MC_PASSTHROUGH -> this.listener.onMcPacket(this, 0, decrypted.body());
                 }
             }

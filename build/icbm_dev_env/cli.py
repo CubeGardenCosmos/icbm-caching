@@ -47,7 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser(
         "slave",
-        help="启动 slave 服务器（build/workspace/slave-server，前台；256M 堆）",
+        help="启动 slave 服务器（build/workspace/server/slave，前台；256M 堆）",
+    )
+    sub.add_parser(
+        "debug-run",
+        help="启动 debug 实例（source/master/slave + jre；TUI 三窗口，Shift+Tab 切换；"
+        "slave 监听 0.0.0.0:25565，区域 icbm:lan；Ctrl-C 退出）",
     )
     sub.add_parser(
         "e2e",

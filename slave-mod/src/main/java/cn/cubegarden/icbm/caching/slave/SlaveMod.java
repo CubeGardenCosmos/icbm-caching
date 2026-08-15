@@ -46,8 +46,10 @@ public final class SlaveMod implements ModInitializer {
             this.setup(server);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(this::teardown);
-        net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
-                cn.cubegarden.icbm.caching.slave.command.IcbmSlaveCommand.register(dispatcher));
+        net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+                cn.cubegarden.icbm.caching.slave.command.IcbmSlaveCommand.register(dispatcher);
+                cn.cubegarden.icbm.caching.slave.command.BmToolCommand.register(dispatcher);
+            });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             SlaveRuntime runtime = SlaveRuntime.current();
             if (runtime != null) {
@@ -125,8 +127,12 @@ public final class SlaveMod implements ModInitializer {
         });
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(
                 tickServer -> reloader.onServerTick(tickServer));
+        // bmtool debug 状态提示（/bmtool debug toggle 开启后 action bar 输出性能/通讯/UUID）
+        cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay =
+                new cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay(client, config.uuidHex());
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(debugOverlay::onServerTick);
         SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,
-                overlay, config.brand());
+                overlay, config.brand(), debugOverlay);
         SlaveRuntime.install(runtime);
         client.start();
         // 初始同步闸门：装载 spawn 区块前等基线（WORLD_EPOCH/快照）；超时不阻断（fail closed）

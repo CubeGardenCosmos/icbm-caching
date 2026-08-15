@@ -52,9 +52,10 @@ public final class ControlServiceMain {
         cn.cubegarden.icbm.caching.control.auth.TicketVault ticketVault =
                 new cn.cubegarden.icbm.caching.control.auth.TicketVault();
         service.setTicketVault(ticketVault);
-        cn.cubegarden.icbm.caching.control.auth.MojangSessionVerifier verifier =
-                new cn.cubegarden.icbm.caching.control.auth.MojangSessionVerifier(
-                        config.auth().verifyMojang(), config.auth().mojangTimeoutMillis());
+        // 登录握手（借用 Mojang authlib 官方实现验证；RSA 在 master，slave 透传握手）
+        cn.cubegarden.icbm.caching.control.auth.LoginHandshake handshake =
+                new cn.cubegarden.icbm.caching.control.auth.LoginHandshake(
+                        config.auth().verifyMojang(), config.auth().hasJoinedIp());
         byte[] assertionKey = config.auth().assertionKey().isEmpty()
                 ? loadOrCreateAssertionKey(config.storeRoot())
                 : config.auth().assertionKey().getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -69,7 +70,7 @@ public final class ControlServiceMain {
                 config.heartbeatIntervalMillis() * 3);
         cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener authGateway =
                 new cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener(
-                        sessionRegistry, ticketVault, verifier, signer, routing,
+                        sessionRegistry, ticketVault, handshake, signer, routing,
                         config.serverId(), 60_000);
         // 过期断言周期清理（A9 审计修复；每 30s 一次，防会话表泄漏）
         java.util.concurrent.ScheduledExecutorService authCleanup =

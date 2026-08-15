@@ -21,6 +21,7 @@
 | Fabric API | `0.157.1+26.3` | Modrinth fabric-api |
 | Fabric Loom（Gradle 插件） | `1.17.19` | maven.fabricmc.net |
 | netty（控制服务/协议模块） | `4.1.115.Final` | mavenCentral（mod 内由 Minecraft 提供，不重复打包） |
+| Mojang authlib（master 登录验证） | `10.0.76`（+ gson `2.14.0` + guava `33.6.0-jre`） | libraries.minecraft.net（与 26.3 服务端同版） |
 | slf4j / logback | `2.0.16` / `1.5.12` | mavenCentral（control-service 显式；mod 内由 loader 提供） |
 | 参考仓库 | FabricMC/fabric `26.3` 分支；PaperMC/Velocity `master` | 只读克隆到 `build/workspace/` |
 

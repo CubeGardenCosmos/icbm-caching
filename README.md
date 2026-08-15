@@ -42,6 +42,9 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
 - `uv run build/main.py test`：运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source/slave-mod）。
 - `uv run build/main.py server|control|reinit|cleanup`：测试服务器 / master 控制服务（封装通道
   11420，生成 PSK 与 UUID 角色绑定）/ 破坏性重置与清理（见 `build/README.md`）。
+- `uv run build/main.py debug-run`：交互式三进程 debug 实例（`build/workspace/server` 下
+  source/master/slave + jre；TUI 三窗口，Shift+Tab 切换；slave 监听 0.0.0.0:25565、区域
+  `icbm:lan`；配置由 python 覆盖：正版验证/创造模式/32 视距，源服正常地形生成器 + 固定 seed）。
 
 硬约束：新增功能必须先完成 `build/workspace/draft/<功能名>` 三步草稿（参考仓库 → 官方源码 →
 差异取舍）；协议变更必须「文档 + 两侧实现 + golden 测试」同一提交；版本冻结见 `docs/VERSION_FREEZE.md`。

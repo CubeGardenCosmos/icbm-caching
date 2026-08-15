@@ -88,6 +88,8 @@ class SlaveControlClientTest {
         final CountDownLatch subscribed = new CountDownLatch(1);
         final CountDownLatch acked = new CountDownLatch(1);
         final CountDownLatch loginVerifyReceived = new CountDownLatch(1);
+        final CountDownLatch loginKeyReceived = new CountDownLatch(1);
+        final java.security.KeyPair rsaKeyPair = generateRsa();
 
         private Socket socket;
         private DataInputStream in;
@@ -137,7 +139,12 @@ class SlaveControlClientTest {
                         byte[] frame = readWireFrame(this.in);
                         EncapsulatedFrame.Decrypted dec = EncapsulatedFrame.decodeEncryptedFrame(this.decrypt, frame);
                         if (dec.stream() == StreamId.LOGIN_VERIFY) {
-                            this.loginVerifyReceived.countDown();
+                            byte[] payload = dec.body();
+                            if (payload.length >= 1 && MessageType.fromId(payload[0]) == MessageType.LOGIN_KEY_REQ) {
+                                this.loginKeyReceived.countDown();
+                            } else {
+                                this.loginVerifyReceived.countDown();
+                            }
                         } else if (dec.stream() == StreamId.CONTROL) {
                             Envelope env = FrameCodec.decodeFrame(dec.body());
                             if (env.messageType() == MessageType.ACK) {
@@ -185,13 +192,36 @@ class SlaveControlClientTest {
 
         void sendLoginVerifyRes() throws Exception {
             byte[] res = encode(MessageType.LOGIN_VERIFY_RES, new Messages.LoginVerifyRes(
-                    true, "", new Messages.MasterVerifiedIdentity(
+                    true, "", new byte[] {4, 4, 4, 4}, this.rsaKeyPair.getPublic().getEncoded()));
+            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encrypt, StreamId.LOGIN_VERIFY,
+                    prefixed(MessageType.LOGIN_VERIFY_RES, res));
+            this.out.write(frame);
+            this.out.flush();
+        }
+
+        void sendLoginKeyRes() throws Exception {
+            byte[] res = encode(MessageType.LOGIN_KEY_RES, new Messages.LoginKeyRes(
+                    true, "", new byte[16], new Messages.MasterVerifiedIdentity(
                             "master", "key-1", "lobby-1", new byte[16], "sess-1",
                             new byte[16], System.currentTimeMillis() + 60_000, new byte[0],
                             new Messages.ProfileProperty[0])));
-            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encrypt, StreamId.LOGIN_VERIFY, res);
+            byte[] frame = EncapsulatedFrame.encodeEncryptedFrame(this.encrypt, StreamId.LOGIN_VERIFY,
+                    prefixed(MessageType.LOGIN_KEY_RES, res));
             this.out.write(frame);
             this.out.flush();
+        }
+
+        private static byte[] prefixed(MessageType type, byte[] body) {
+            byte[] payload = new byte[1 + body.length];
+            payload[0] = type.id();
+            System.arraycopy(body, 0, payload, 1, body.length);
+            return payload;
+        }
+
+        private static java.security.KeyPair generateRsa() throws Exception {
+            java.security.KeyPairGenerator generator = java.security.KeyPairGenerator.getInstance("RSA");
+            generator.initialize(1024);
+            return generator.generateKeyPair();
         }
 
         void send(MessageType type, long requestId, long worldEpoch, byte[] body) throws Exception {
@@ -341,19 +371,24 @@ class SlaveControlClientTest {
             this.client.start();
             assertTrue(master.subscribed.await(5, TimeUnit.SECONDS));
 
-            // 后台线程递交 LOGIN_VERIFY（模拟验证线程）→ master 回 RES
+            // 后台线程递交阶段 A（模拟登录线程）→ master 回 challenge + 公钥 → 递交阶段 B → 回会话密钥 + 断言
             Thread verifier = new Thread(() -> {
-                Messages.LoginVerifyRes res = this.client.verifyLogin(new Messages.LoginVerifyReq(
-                        "Steve", new byte[16], new Messages.ProfileProperty[0],
-                        "serverHash", new byte[16], "lobby-1", "127.0.0.1:50000",
+                Messages.LoginVerifyRes challenge = this.client.requestChallenge(new Messages.LoginVerifyReq(
+                        "Steve", new byte[16], "lobby-1", "127.0.0.1:50000",
                         new byte[16], System.currentTimeMillis()));
-                if (res != null && res.verified()) {
-                    this.spawnRegistry.onWorldEpoch(DIM, new Messages.SpawnPoint(8, 64, 8, 0, 0));
+                if (challenge != null && challenge.ok()) {
+                    Messages.LoginKeyRes res = this.client.submitKey(new Messages.LoginKeyReq(
+                            new byte[16], new byte[16], new byte[16], new byte[16]));
+                    if (res != null && res.verified()) {
+                        this.spawnRegistry.onWorldEpoch(DIM, new Messages.SpawnPoint(8, 64, 8, 0, 0));
+                    }
                 }
             });
             verifier.start();
             assertTrue(master.loginVerifyReceived.await(5, TimeUnit.SECONDS), "master 必须收到 LOGIN_VERIFY_REQ");
             master.sendLoginVerifyRes();
+            assertTrue(master.loginKeyReceived.await(5, TimeUnit.SECONDS), "master 必须收到 LOGIN_KEY_REQ");
+            master.sendLoginKeyRes();
             verifier.join(5000);
             assertEquals(1, this.spawnRegistry.size(), "验证通过后玩家可放置（spawn 注册）");
         }
@@ -375,9 +410,8 @@ class SlaveControlClientTest {
             Thread.sleep(600);
             assertTrue(master.events.contains("auth_rejected"), "错误 PSK 必须被拒: " + master.events);
             assertTrue(!this.loader.masterConnected(), "AUTH 失败 → fail closed（区块不可服务）");
-            assertNull(this.client.verifyLogin(new Messages.LoginVerifyReq(
-                    "Steve", new byte[16], new Messages.ProfileProperty[0],
-                    "h", new byte[16], "lobby-1", "x", new byte[16], 0)), "未连接 → 拒登录");
+            assertNull(this.client.requestChallenge(new Messages.LoginVerifyReq(
+                    "Steve", new byte[16], "lobby-1", "x", new byte[16], 0)), "未连接 → 拒登录");
         }
     }
 }

@@ -308,14 +308,6 @@ public final class MessageBodyCodec {
             public void encode(DataOutput out, Messages.LoginVerifyReq value) throws IOException {
                 writeString(out, value.playerName());
                 writeUuid(out, value.playerUuid());
-                out.writeShort(value.profileProperties().length);
-                for (Messages.ProfileProperty property : value.profileProperties()) {
-                    writeString(out, property.name());
-                    writeString(out, property.value());
-                    writeString(out, property.signature());
-                }
-                writeString(out, value.serverHash());
-                writeUuid(out, value.sharedSecret());
                 writeString(out, value.slaveId());
                 writeString(out, value.connectionInfo());
                 writeUuid(out, value.nonce());
@@ -324,30 +316,54 @@ public final class MessageBodyCodec {
 
             @Override
             public Messages.LoginVerifyReq decode(DataInput in) throws IOException {
-                String playerName = readString(in);
-                byte[] playerUuid = readUuid(in);
-                int count = in.readUnsignedShort();
-                Messages.ProfileProperty[] properties = new Messages.ProfileProperty[count];
-                for (int i = 0; i < count; i++) {
-                    properties[i] = new Messages.ProfileProperty(readString(in), readString(in), readString(in));
-                }
-                String serverHash = readString(in);
-                byte[] sharedSecret = readUuid(in);
-                String slaveId = readString(in);
-                String connectionInfo = readString(in);
-                byte[] nonce = readUuid(in);
-                long sentAt = in.readLong();
                 return new Messages.LoginVerifyReq(
-                        playerName, playerUuid, properties, serverHash, sharedSecret,
-                        slaveId, connectionInfo, nonce, sentAt
+                        readString(in), readUuid(in), readString(in), readString(in),
+                        readUuid(in), in.readLong()
                 );
             }
         });
         register(MessageType.LOGIN_VERIFY_RES, new Codec<Messages.LoginVerifyRes>() {
             @Override
             public void encode(DataOutput out, Messages.LoginVerifyRes value) throws IOException {
+                out.writeBoolean(value.ok());
+                writeString(out, value.reason());
+                if (value.ok()) {
+                    writeBytes(out, value.challenge());
+                    writeBytes(out, value.publicKeyDer());
+                }
+            }
+
+            @Override
+            public Messages.LoginVerifyRes decode(DataInput in) throws IOException {
+                boolean ok = in.readBoolean();
+                String reason = readString(in);
+                if (!ok) {
+                    return Messages.LoginVerifyRes.reject(reason);
+                }
+                return new Messages.LoginVerifyRes(true, reason, readBytes(in), readBytes(in));
+            }
+        });
+        register(MessageType.LOGIN_KEY_REQ, new Codec<Messages.LoginKeyReq>() {
+            @Override
+            public void encode(DataOutput out, Messages.LoginKeyReq value) throws IOException {
+                writeUuid(out, value.playerUuid());
+                writeUuid(out, value.nonce());
+                writeBytes(out, value.keybytes());
+                writeBytes(out, value.encryptedChallenge());
+            }
+
+            @Override
+            public Messages.LoginKeyReq decode(DataInput in) throws IOException {
+                return new Messages.LoginKeyReq(
+                        readUuid(in), readUuid(in), readBytes(in), readBytes(in));
+            }
+        });
+        register(MessageType.LOGIN_KEY_RES, new Codec<Messages.LoginKeyRes>() {
+            @Override
+            public void encode(DataOutput out, Messages.LoginKeyRes value) throws IOException {
                 out.writeBoolean(value.verified());
                 writeString(out, value.reason());
+                writeBytes(out, value.sharedSecret());
                 if (value.verified()) {
                     Messages.MasterVerifiedIdentity id = value.identity();
                     if (id == null) {
@@ -371,9 +387,10 @@ public final class MessageBodyCodec {
             }
 
             @Override
-            public Messages.LoginVerifyRes decode(DataInput in) throws IOException {
+            public Messages.LoginKeyRes decode(DataInput in) throws IOException {
                 boolean verified = in.readBoolean();
                 String reason = readString(in);
+                byte[] sharedSecret = readBytes(in);
                 Messages.MasterVerifiedIdentity identity = null;
                 if (verified) {
                     identity = new Messages.MasterVerifiedIdentity(
@@ -391,7 +408,7 @@ public final class MessageBodyCodec {
                             identity.playerUuid(), identity.sessionId(), identity.nonce(),
                             identity.expiresAt(), identity.signature(), properties);
                 }
-                return new Messages.LoginVerifyRes(verified, reason, identity);
+                return new Messages.LoginKeyRes(verified, reason, sharedSecret, identity);
             }
         });
         register(MessageType.SESSION_CLOSED, new Codec<Messages.SessionClosed>() {

@@ -8,12 +8,20 @@ group = project.maven_group
 
 repositories {
     mavenCentral()
+    // Mojang 官方 maven：com.mojang:authlib（登录验证官方实现，与 26.3 冻结同版，
+    // docs/VERSION_FREEZE.md；MinecraftServicesDiscoveryService.create(proxy) 注入代理）
+    maven { url = 'https://libraries.minecraft.net' }
 }
 
 dependencies {
     // 共享协议模块（includeBuild('../protocol') 提供）
     api "cn.cubegarden.icbm.caching:protocol:${project.protocol_version}"
     implementation 'org.slf4j:slf4j-api:2.0.16' // Velocity 运行时提供（独立进程形态自备）
+
+    // Mojang authlib + 其传递依赖（借用官方 hasJoinedServer 验证；不自造 HTTP/JSON）
+    implementation "com.mojang:authlib:${project.authlib_version}"
+    implementation "com.google.code.gson:gson:${project.gson_version}"
+    implementation "com.google.guava:guava:${project.guava_version}"
 
     // 独立进程形态（ControlServiceMain）的日志实现；Velocity 插件形态由代理进程提供
     runtimeOnly 'ch.qos.logback:logback-classic:1.5.12'

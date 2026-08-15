@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import cn.cubegarden.icbm.caching.control.auth.AuthGatewayListener;
 import cn.cubegarden.icbm.caching.control.auth.IdentitySigner;
-import cn.cubegarden.icbm.caching.control.auth.MojangSessionVerifier;
 import cn.cubegarden.icbm.caching.control.auth.SessionRegistry;
 import cn.cubegarden.icbm.caching.control.auth.TicketVault;
 import cn.cubegarden.icbm.caching.control.bridge.CompositeSessionListener;
@@ -92,7 +91,8 @@ class McPassthroughBridgeTest {
         this.packetLog = new PacketLog(64);
         this.bridge = new McPassthroughBridge(routing, this.circuitBreaker, this.packetLog);
         AuthGatewayListener authGateway = new AuthGatewayListener(sessionRegistry, ticketVault,
-                new MojangSessionVerifier(false, 5_000), signer, routing, "master-1", 60_000);
+                new cn.cubegarden.icbm.caching.control.auth.LoginHandshake(false, false),
+                signer, routing, "master-1", 60_000);
         this.encapsulated = new EncapsulatedControlServer(this.config, this.service, this.replicator,
                 this.registry, new CompositeSessionListener(authGateway, this.bridge));
         this.encapsulated.start();

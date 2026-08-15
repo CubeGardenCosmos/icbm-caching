@@ -52,7 +52,7 @@ def _load_master_props() -> dict[str, str]:
 
 def _write_source_control_config(master_props: dict[str, str]) -> None:
     """源服 icbm-control.properties：backend 授信模式（master 主动连源服 11430）。"""
-    world = paths.SERVER_DIR / "world"
+    world = paths.DEBUG_SOURCE / "world"
     world.mkdir(parents=True, exist_ok=True)
     secret = master_props.get("control.backendForwardingSecret", "")
     if not secret:
@@ -168,6 +168,10 @@ def _rcon_password() -> str:
 
 def run_e2e() -> int:
     print("=== 里程碑 6 端到端：源服 setblock → 快照 → master → slave → 玩家视角 ===")
+    # 截断历史日志：_wait_log 按内容匹配，残留的旧运行行（如旧的「Done (」「已提交快照」）
+    # 会令等待瞬间命中，导致后续检查与真实运行错位（debug-run 重启暴露）
+    for log in (SOURCE_LOG, MASTER_LOG, SLAVE_LOG):
+        log.write_text("")
     master_props = _load_master_props()
     env = jdk.java_home_env()
 
@@ -181,11 +185,11 @@ def run_e2e() -> int:
 
         source_jar = sorted((paths.component_root("fabric-source") / "build" / "libs").glob("icbm-source-*.jar"))
         source_jar = [j for j in source_jar if "sources" not in j.name][-1]
-        shutil.copyfile(source_jar, paths.SERVER_DIR / "mods" / source_jar.name)
-        for stale in (paths.SERVER_DIR / "mods").glob("icbm-source-*.jar"):
+        shutil.copyfile(source_jar, paths.DEBUG_SOURCE / "mods" / source_jar.name)
+        for stale in (paths.DEBUG_SOURCE / "mods").glob("icbm-source-*.jar"):
             if stale.name != source_jar.name:
                 stale.unlink()
-        for d in (paths.SERVER_DIR / "world", paths.SERVER_DIR / "icbm_snapshots"):
+        for d in (paths.DEBUG_SOURCE / "world", paths.DEBUG_SOURCE / "icbm_snapshots"):
             if d.exists():
                 shutil.rmtree(d)
                 print(f"  [源服] 清理历史世界: {d}（全新 epoch）")
@@ -201,7 +205,7 @@ def run_e2e() -> int:
         # 1) 源服先启动（backend 监听 11430；master 后连）
         _write_source_control_config(master_props)
         procs.append(_start(["java", "-Xmx1G", "-jar", "fabric-server-launch.jar", "nogui"],
-                            SOURCE_LOG, "源服", paths.SERVER_DIR, env))
+                            SOURCE_LOG, "源服", paths.DEBUG_SOURCE, env))
         _wait_port("127.0.0.1", SOURCE_PORT, 180, "源服")
         _wait_port("127.0.0.1", BACKEND_PORT, 60, "源服 backend")
         _wait_log(SOURCE_LOG, "Done (", 60, "源服就绪")

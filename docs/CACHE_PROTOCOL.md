@@ -293,34 +293,64 @@ slave 只在满足以下全部条件时把本地对象作为虚拟后端基线�
 控制服务校验 HELLO.minecraftVersion 为 26.3 系列（前缀匹配，完整版本名如 “26.3 Snapshot 8”
 与快照 id 均接受）；精确版本由 runtimeProtocol 锁定（1073742154）。
 
-## 9. 登录验证与会话记账（阶段1 已实现）
+## 9. 登录验证与会话记账（阶段1 已实现；登录握手移交 master 重构后）
 
-背景：Auth Gateway 归 master（HIERARCHY §2/§3）。slave 终止 Minecraft 登录握手（RSA 密钥在
-slave），把验证材料经受信控制通道递交给 master；master 是唯一执行 Mojang 正版验证的组件，
-验证通过后登记全局活跃会话表（同一玩家 UUID 同时只允许一个会话，防玩家加入多个 slave）并签发
-身份断言。
+背景：Auth Gateway 归 master（HIERARCHY §2/§3）。**登录握手由 master 按 velocity/原版模式
+执行**（RSA 密钥对在 master，启动时生成一次，1024 位，26.3 Crypt.generateKeyPair 对照）；
+slave 只透传握手并拿回会话密钥——以 sharedSecret 建 AES/CFB8 Cipher 解密客户端报文
+（Crypt.getCipher 对照）后继续原版流程。master 是唯一执行 Mojang 正版验证的组件（借
+Mojang authlib 官方实现：MinecraftServicesDiscoveryService.create(proxy) →
+SessionService.hasJoinedServer，不自造 HTTP/JSON），验证通过后以**验证通过的 UUID** 登记
+全局活跃会话表（同一玩家 UUID 同时只允许一个会话，防玩家加入多个 slave）并签发身份断言。
 
-消息 type 与字段已冻结并做 golden 测试（LOGIN_VERIFY_REQ=0x11 / LOGIN_VERIFY_RES=0x12 /
-SESSION_CLOSED=0x13；按 AGENTS.md 约定，新增消息 type 已在同一提交中更新本文档与两侧实现）：
+登录流（两阶段，走 LOGIN_VERIFY 流；流内帧 = [type(1)][消息体]，golden 测试锁定）：
 
-### LOGIN_VERIFY_REQ（slave → master）
+阶段 A（握手挑战）：
+- slave 收到客户端 hello → LOGIN_VERIFY_REQ；master 依次 票据单次兑换 → 落点判定，
+  通过后生成每登录随机 challenge（官方 ServerLoginPacketListenerImpl.java:67 对照）；
+- LOGIN_VERIFY_RES(ok=true) 附 challenge + master 公钥 X.509 DER——slave 构造
+  ClientboundHelloPacket("", pubkey, challenge, true) 发客户端（:127 对照）；
+  客户端回 ServerboundKeyPacket（RSA 加密会话密钥 + 加密挑战回显，26.3 同字段）。
 
-    playerName(2+utf8) / playerUuid(16) / profileProperties(count(2) + 每项 name(2+utf8) +
-      value(2+utf8) + signature(2+utf8))
-    serverHash(2+utf8) / sharedSecret(16)（加密材料，供 master 调用 session server 验证）
-    slaveId(2+utf8) / connectionInfo(2+utf8) / nonce(16) / sentAt(8)
+阶段 B（验证 + 会话密钥）：
+- slave 把 ServerboundKeyPacket 原样字段递交 LOGIN_KEY_REQ；master 用私钥解密会话密钥
+  （Crypt.decryptByteToSecretKey 对照）→ 校验挑战回显 → 计算 digest
+  （Crypt.digestData 对照：SHA-1 over serverId‖secret‖pubkey，BigInteger hex）→
+  authlib SessionService.hasJoinedServer(name, digest, ip)（ip 仅 hasJoinedIp=true 携带，
+  26.3 prevent-proxy-connections 语义）→ 以验证 UUID 记账（重复会话拒新）→ 签发断言；
+- LOGIN_KEY_RES(verified=true) 附 sharedSecret(16) + MasterVerifiedIdentity
+  （profileProperties = hasJoined 纹理签名属性，随断言传 slave 供 GameProfile 皮肤）。
 
-### LOGIN_VERIFY_RES（master → slave）
+消息 type 与字段（LOGIN_VERIFY_REQ=0x11 / LOGIN_VERIFY_RES=0x12 / SESSION_CLOSED=0x13 /
+LOGIN_KEY_REQ=0x19 / LOGIN_KEY_RES=0x1A；golden 测试锁定）：
 
-    verified(1) + reason(2+utf8)
+### LOGIN_VERIFY_REQ（slave → master，阶段 A）
+
+    playerName(2+utf8) / playerUuid(16)（客户端声明）/ slaveId(2+utf8) /
+    connectionInfo(2+utf8)（"ip:port"，slave 侧 remote）/ nonce(16) / sentAt(8)
+
+### LOGIN_VERIFY_RES（master → slave，阶段 A 响应）
+
+    ok(1) + reason(2+utf8)
+    ok=true 时附：challenge(16) + publicKeyDer(2+bytes)
+    ok=false 时 reason 为拒绝原因：REPLAYED_NONCE（票据重放）/ SERVER_NOT_ALLOWED（落点白名单）/
+      RATE_LIMITED / 黑名单
+
+### LOGIN_KEY_REQ（slave → master，阶段 B）
+
+    playerUuid(16) / nonce(16)（与阶段 A 同一 nonce 关联）/ keybytes(2+bytes) /
+    encryptedChallenge(2+bytes)（ServerboundKeyPacket 原样字段）
+
+### LOGIN_KEY_RES（master → slave，阶段 B 响应）
+
+    verified(1) + reason(2+utf8) + sharedSecret(16)
     verified=true 时附 MasterVerifiedIdentity 断言：
-      issuer(2+utf8) / keyId(2+utf8) / audience(2+utf8) / playerUuid(16) /
-      sessionId(2+utf8) / nonce(16) / expiresAt(8) / signature(2+bytes) /
+      issuer(2+utf8) / keyId(2+utf8) / audience(2+utf8) / playerUuid(16)（Mojang 验证通过的
+      UUID）/ sessionId(2+utf8) / nonce(16) / expiresAt(8) / signature(2+bytes) /
       profileProperties(count(2) + 每项 name(2+utf8) + value(2+utf8) + signature(2+utf8))
-      （hasJoined 返回的纹理签名属性，随断言传 slave 供 GameProfile 皮肤）
-    verified=false 时 reason 为拒绝原因：验证失败 / DUPLICATE_SESSION（已存在于其它 slave）/
-      REPLAYED_NONCE（票据重放）/ SERVER_NOT_ALLOWED（落点白名单）/ UNVERIFIED_USERNAME /
-      AUTH_SERVERS_UNAVAILABLE / 黑名单 / 吊销
+    verified=false 时 reason：DUPLICATE_SESSION（验证 UUID 已存在于其它 slave）/
+      UNVERIFIED_USERNAME（hasJoined 未命中）/ AUTH_SERVERS_UNAVAILABLE /
+      CHALLENGE_MISMATCH / KEY_DECRYPT_FAILED / KEY_UNKNOWN（阶段 A 过期或重放）
 
 ### SESSION_CLOSED（slave → master）
 
@@ -328,20 +358,30 @@ SESSION_CLOSED=0x13；按 AGENTS.md 约定，新增消息 type 已在同一提�
 
 master 注销记账（防会话表泄漏）；玩家断开、切换落点、后端故障均需上报。
 
-落地状态（里程碑 4/5）：slave 侧 LoginVerifyGate 在玩家登出时上报 SESSION_CLOSED；master 侧
-SessionRegistry（控制服务内模块）经 ControlService.onSessionClosed 注销（SESSION_CLOSED 同时
-吊销票据）；slave 连接断开时按 slave 维度批量注销（SESSION_CLOSED 未送达时防会话表泄漏）。
+落地状态（里程碑 4/5 + 握手移交重构）：slave 侧 LoginVerifyGate 在玩家登出时上报
+SESSION_CLOSED；master 侧 SessionRegistry（控制服务内模块）经 ControlService.onSessionClosed
+注销（SESSION_CLOSED 同时吊销票据）；slave 连接断开时按 slave 维度批量注销
+（SESSION_CLOSED 未送达时防会话表泄漏；挂起握手随断开清理）。
 
-完整验证流程（里程碑 5）：master 是唯一验证者，依次：
-1. 票据单次兑换：LOGIN_VERIFY_REQ.nonce 首次出现才继续；同一 nonce 重放 → REPLAYED_NONCE；
-2. 全局会话记账：playerUuid 已活跃 → DUPLICATE_SESSION（拒新；踢旧为管理操作 kickOld）；
-3. 落点判定：serverName（= slaveId）不在白名单 → SERVER_NOT_ALLOWED；
-4. Mojang 正版验证：复刻 26.3 ServerLoginPacketListenerImpl.handleKey 语义
-   （serverHash = sha1-hex digest，hasJoined URL 带 username/serverId/ip）→ 未验证/服务不可用
-   → 拒绝（fail closed，AUTH_SERVERS_UNAVAILABLE）；offline 开关（control.auth.verifyMojang=false）
-   放行但仍记账（开发/测试惯例，生产必须开启）；
-5. 断言签发：MasterVerifiedIdentity 经 HMAC-SHA256(master assertion key, canonical 字段编码)
-   签名（keyId 轮换支持；断言短过期 expiresAt；profileProperties 随断言），RES(verified=true)。
+完整验证流程（握手移交 master 后）：master 是唯一验证者，依次：
+1. （阶段 A）票据单次兑换：LOGIN_VERIFY_REQ.nonce 首次出现才继续；同一 nonce 重放
+   → REPLAYED_NONCE；
+2. （阶段 A）落点判定：serverName（= slaveId）不在白名单 → SERVER_NOT_ALLOWED；
+3. （阶段 A）每登录随机 challenge + master 公钥 → slave 发 ClientboundHelloPacket 给客户端；
+4. （阶段 B）RSA 解密会话密钥（Crypt.decryptByteToSecretKey 对照）→ 挑战回显校验 →
+   digest = SHA-1(serverId‖secret‖pubkey) hex（Crypt.digestData 对照）；
+5. （阶段 B）Mojang 正版验证：借 Mojang authlib 官方实现
+   MinecraftServicesDiscoveryService.create(proxy).createMinecraftSessionService() →
+   SessionService.hasJoinedServer(name, digest, ip)（ip 仅 control.auth.hasJoinedIp=true 时携带，
+   26.3 prevent-proxy-connections 默认不带——slave 透传时其看到的客户端地址在 localhost/LAN
+   与 Mojang 会话来源 IP 不一致）→ 未验证/服务不可用 → 拒绝（fail closed，
+   UNVERIFIED_USERNAME / AUTH_SERVERS_UNAVAILABLE）；offline 开关
+   （control.auth.verifyMojang=false）以客户端声明身份放行但仍记账（开发/测试惯例，生产必须开启）；
+6. （阶段 B）全局会话记账：以**验证通过的 UUID** 记账，已活跃 → DUPLICATE_SESSION（拒新；
+   踢旧为管理操作 kickOld），与官方 verifyLoginAndFinishConnectionSetup 同序；
+7. （阶段 B）断言签发：MasterVerifiedIdentity 经 HMAC-SHA256(master assertion key, canonical
+   字段编码) 签名（keyId 轮换支持；断言短过期 expiresAt；profileProperties 随断言），
+   LOGIN_KEY_RES(verified=true, sharedSecret, 断言)。
 
 失败路径回滚记账与票据（保证不泄漏）。断言签名密钥在 master 离线保护；对称 HMAC 在封装
 通道受信面内防重放/完整性，slave 间伪造由通道会话密钥隔离阻断（非对称公钥验证随密钥分发流
@@ -349,7 +389,10 @@ SessionRegistry（控制服务内模块）经 ControlService.onSessionClosed 注
 
 约束：
 
-- 验证请求走封装通道受信流（§1），不经玩家流量；不进入 Minecraft 登录协议本身。
+- 登录握手走封装通道受信流（§1）两阶段，不经玩家流量（玩家流量只在 slave 本地解密后进入
+  缓存/权威会话数据面）。
+- RSA 密钥对在 master 启动时生成一次（1024 位，官方 Crypt.generateKeyPair 同规格），全体登录
+  共用；每登录仅 challenge 随机。
 - master 记账与落点判定的竞态（验证通过→玩家真正进入后端之间）需两阶段确认或持有锁，避免双通过。
 - offline 模式（开发/测试）：master 配置开关，verify=false 时直接放行但仍记账（沿用测试服务器惯例）。
 - 重复会话策略（拒新 / 踢旧）与“源服 + 一个缓存后端同时在线”是否允许，由部署策略定案。

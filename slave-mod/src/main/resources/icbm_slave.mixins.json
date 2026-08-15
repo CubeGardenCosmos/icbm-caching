@@ -6,6 +6,7 @@
   "mixins": [
     "MinecraftServerBrandMixin",
     "LoginVerifyGateMixin",
+    "ServerboundKeyPacketAccessor",
     "PlayerBoundsMixin",
     "SpectateGateMixin",
     "SaveGateMixin",

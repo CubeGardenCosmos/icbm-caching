@@ -29,7 +29,9 @@ public enum MessageType {
     OPERATION_COMMITTED(0x15),
     OPERATION_REJECTED(0x16),
     GET_OPERATION_STATUS(0x17),
-    OPERATION_STATUS_RES(0x18);
+    OPERATION_STATUS_RES(0x18),
+    LOGIN_KEY_REQ(0x19),
+    LOGIN_KEY_RES(0x1A);
 
     private final byte id;
 

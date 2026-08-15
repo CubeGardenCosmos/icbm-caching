@@ -192,6 +192,7 @@ public final class EventLog {
                 writeDimension(out, event.dimension());
                 out.writeLong(event.revision());
                 writeString(out, event.fingerprint());
+                writeSpawn(out, event.spawn());
             }
             case INVALIDATE -> {
                 writeDimension(out, event.dimension());

@@ -7,12 +7,13 @@ import java.security.SecureRandom;
 import java.util.UUID;
 
 /**
- * 登录验证材料递交（HIERARCHY §2 / CACHE_PROTOCOL §9）：slave 终止 26.3 登录握手
- * （RSA 在 slave），把验证材料（serverHash/sharedSecret/客户端声明身份/连接信息/nonce）
- * 经 LOGIN_VERIFY 流交给 master（唯一验证者），master 返回前不放行。
+ * 登录握手透传（HIERARCHY §2 / CACHE_PROTOCOL §9）：RSA 密钥对在 master，slave 只透传
+ * 握手——阶段 A 递交 LOGIN_VERIFY_REQ 拿回挑战 + master 公钥（构造 ClientboundHelloPacket
+ * 发客户端）；阶段 B 递交客户端加密响应（LOGIN_KEY_REQ）拿回会话密钥 sharedSecret + 身份
+ * 断言（slave 以 sharedSecret 建 Cipher 解密客户端报文并继续原版流程）。
  *
- * <p>profileProperties 由 master 的 hasJoinedServer 结果填充（客户端 hello 不携带 properties，
- * 26.3 ServerboundHelloPacket(name, profileId)）；slave 不直接调用 Mojang session server。
+ * <p>profileProperties 由 master 的 Mojang hasJoinedServer 结果填充（客户端 hello 不携带
+ * properties，26.3 ServerboundHelloPacket(name, profileId)）；slave 不直接调用 Mojang。
  */
 public final class LoginVerifyGate {
 
@@ -28,22 +29,44 @@ public final class LoginVerifyGate {
     }
 
     /**
-     * 验证玩家（在登录验证线程调用，阻塞等 master RES；null/未验证 → 拒登录）。
+     * 阶段 A：递交登录开始，等 master 挑战（null → 拒登录）。
      *
-     * @param profileId    客户端声明 UUID（ServerboundHelloPacket.profileId）
-     * @param serverHash   sha1-hex(serverId ‖ publicKey ‖ sharedSecret)（26.3 Crypt.digestData）
-     * @param sharedSecret 客户端加密的会话密钥明文（16 字节）
+     * @param profileId 客户端声明 UUID（ServerboundHelloPacket.profileId）
      */
-    public Messages.LoginVerifyRes verify(String name, UUID profileId, String serverHash,
-                                          byte[] sharedSecret, InetSocketAddress remote) {
+    public Messages.LoginVerifyRes requestChallenge(String name, UUID profileId,
+                                                    InetSocketAddress remote) {
         byte[] nonce = new byte[16];
         RANDOM.nextBytes(nonce);
         Messages.LoginVerifyReq req = new Messages.LoginVerifyReq(
-                name, uuidToBytes(profileId), new Messages.ProfileProperty[0],
-                serverHash, sharedSecret, this.slaveId,
+                name, uuidToBytes(profileId), this.slaveId,
                 remote == null ? "unknown" : remote.getAddress().getHostAddress() + ":" + remote.getPort(),
                 nonce, System.currentTimeMillis());
-        return this.client.verifyLogin(req);
+        Messages.LoginVerifyRes res = this.client.requestChallenge(req);
+        if (res == null) {
+            return null;
+        }
+        if (!res.ok()) {
+            return res;
+        }
+        // 保存 nonce 供阶段 B 关联（同一次登录的挑战请求与密钥递交）
+        this.pendingNonces.put(uuidHex(profileId), nonce);
+        return res;
+    }
+
+    private final java.util.Map<String, byte[]> pendingNonces =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 阶段 B：递交客户端加密响应（ServerboundKeyPacket 原样字段），等 master 会话密钥 +
+     * 断言（null → 拒登录）。
+     */
+    public Messages.LoginKeyRes submitKey(UUID profileId, byte[] keybytes, byte[] encryptedChallenge) {
+        byte[] nonce = this.pendingNonces.remove(uuidHex(profileId));
+        if (nonce == null) {
+            return null;
+        }
+        return this.client.submitKey(new Messages.LoginKeyReq(
+                uuidToBytes(profileId), nonce, keybytes, encryptedChallenge));
     }
 
     /**
@@ -62,6 +85,10 @@ public final class LoginVerifyGate {
         if (sessionId != null) {
             this.sessions.put(profileId.toString(), sessionId);
         }
+    }
+
+    private static String uuidHex(UUID uuid) {
+        return java.util.HexFormat.of().formatHex(uuidToBytes(uuid));
     }
 
     private static byte[] uuidToBytes(UUID uuid) {
