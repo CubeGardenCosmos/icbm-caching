@@ -58,14 +58,16 @@
 
 - 组件目录归属是架构约束，不是建议，第一方组件使用 `icbm-` 前缀；Java 包统一以 `cn.cubegarden.icbm.caching` 为根（与仓库/项目身份一致），按组件分子包：
   - `fabric-source/`：源 Fabric 权威模组（Java；包 `cn.cubegarden.icbm.caching.source`，模组 ID `icbm_source`）。
-  - `velocity-plugin/`：master/slave Velocity 插件（包 `cn.cubegarden.icbm.caching.velocity`；阶段2 已实现控制平面复制客户端与 serve gate，Velocity 事件/路由接线为阶段4）。
-  - `virtual-backend/`：虚拟后端（阶段3 已实现 26.3 旁观者会话，包 `cn.cubegarden.icbm.caching.virtual`）。
-  - `control-service/`：缓存控制服务（master 缓存目录，包 `cn.cubegarden.icbm.caching.control`；阶段2 已实现 mTLS 控制平面、对象库、事件日志与 slave 复制）。
-  - `auth-gateway/`：唯一执行 Mojang 正版验证的认证网关（未来）。
+  - `velocity-plugin/`：master 统筹中心 Velocity 插件（包 `cn.cubegarden.icbm.caching.velocity`；阶段2 已实现控制平面复制客户端与 serve gate；阶段1 修正后职责为 master 落点判定/切换/会话记账，接线为阶段3）。
+  - `virtual-backend/`：阶段3 已实现的独立 26.3 旁观会话后端（包 `cn.cubegarden.icbm.caching.virtual`）；阶段1 修正后作为 slave Fabric 模组化的技术基础（可演进为只读变体或迁移入 slave 模组）。
+  - `control-service/`：master 缓存目录/控制服务（包 `cn.cubegarden.icbm.caching.control`；阶段2 已实现 mTLS 控制平面、对象库、事件日志与 slave 复制）。
+  - `slave-mod/`：slave Fabric 模组后端（阶段1 修正新增，原生 MC 服务器进程上接管游戏事件，只实现协议与部分预测，不做世界计算；256M JVM / 磁盘缓存约束——规划中）。
+  - `auth-gateway/`：Mojang 正版验证组件（阶段1 修正后归 master 受信面：master 内实现验证 + 全局会话记账；不再作为独立前置组件）。
   - `protocol/`：跨组件共享控制协议（包 `cn.cubegarden.icbm.caching.protocol`，纯 Java 25，netty/slf4j 由消费方提供；含包络/消息编解码、SnapshotObjectStore、ControlChannel 客户端基类）。
   - `docs/`：设计与协议文档；`build/`：Python 开发环境工具。
   - 跨组件共享的控制协议消息类型放 `cn.cubegarden.icbm.caching.protocol`（单侧实现，两侧复用，不得另写副本）。
-- 源模组只做权威世界侧工作（脏标记、快照、revision、主线程裁决）；不得在源模组内实现客户端会话、虚拟后端或缓存对象库职责（见 ARCHITECTURE.md 的“必须负责/不得负责”表）。
+- 源模组只做权威世界侧工作（脏标记、快照、revision、主线程裁决）；不得在源模组内实现客户端会话、slave 后端或缓存对象库职责（见 ARCHITECTURE.md 的“必须负责/不得负责”表）。
+- slave（含原 virtual-backend 演进）不做世界计算：不 worldgen、不 tick 模拟世界、不持久化写回；未命中/落后/epoch 不匹配时 fail closed 不展示旧区块；以 256M JVM 与磁盘缓存为设计约束（见 ARCHITECTURE.md §1.1/§3.1）。
 - 通讯协议变更必须同步修改 `docs/CACHE_PROTOCOL.md`；新增消息 type 必须在同一提交中更新文档与两侧实现。
 - 不得机械替换 `minecraft:*`、原版 NBT 键、协议字段、Mojang 类型名或第三方项目名；26.3 常量必须来自 `build/workspace/minecraft-assets` 或实际字节码验证，禁止复制 26.2/1.21.x 的常量。
 

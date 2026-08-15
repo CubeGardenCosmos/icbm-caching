@@ -1,7 +1,8 @@
 # ICBM 控制协议
 
-状态：实现 v3（阶段2 后台控制协议落地；草稿 `build/workspace/draft/phase2-control-protocol`）
-参与方：源 Fabric 权威模组、master 缓存目录（control-service）、slave（velocity-plugin）、虚拟后端
+状态：实现 v3（阶段2 后台控制协议落地；草稿 `build/workspace/draft/phase2-control-protocol`）；
+     阶段1 架构修正新增 §9 登录验证草案（未实现，随两侧同一提交落地）
+参与方：源 Fabric 权威模组、master（统筹中心 + Auth Gateway + 缓存目录）、slave（Fabric 模组后端）
 非目标：替代客户端与 Minecraft 后端之间的标准 26.3 游戏协议
 
 ## 1. 传输、安全与包络
@@ -12,6 +13,11 @@
 （单帧上限可配置，默认 16 MiB；PUT_SNAPSHOT payload 单独上限 64 MiB）、连接速率与审计日志
 由控制服务实施。只有源服对世界操作的最终裁决进入源 Fabric 的主线程；复制、订阅、失效与
 快照均不依赖 Minecraft tick。
+
+> 端口规划（待定项，阶段1 修正）：当前为独立 mTLS 受信端口；“打包进 25565 游戏端口”为备选
+> 方向，因安全隔离（控制面与公网玩家入口混流）、流量干扰与审计因素尚未定案；定案后同步
+> 更新 HIERARCHY §6 与本节。玩家流量不经过 master；登录验证材料经受信控制通道递交 master
+> （见 §9），不进入游戏端口。
 
 每条消息使用二进制包络（golden 序列化测试锁定线上字节布局）：
 
@@ -195,3 +201,42 @@ slave 只在满足以下全部条件时把本地对象作为虚拟后端基线�
 
 不变：Custom Payload channel 仅用于玩家会话内可选功能（独占命名空间、版本化 codec、大小限制、
 能力协商），不承担后台 snapshot、invalidate 或 operation 主通道。
+
+## 8. HELLO minecraftVersion
+
+控制服务校验 HELLO.minecraftVersion 为 26.3 系列（前缀匹配，完整版本名如 “26.3 Snapshot 8”
+与快照 id 均接受）；精确版本由 runtimeProtocol 锁定（1073742154）。
+
+## 9. 登录验证与会话记账（阶段1 修正草案，未实现）
+
+背景：Auth Gateway 归 master（HIERARCHY §2/§3）。slave 终止 Minecraft 登录握手（RSA 密钥在
+slave），把验证材料经受信控制通道递交给 master；master 是唯一执行 Mojang 正版验证的组件，
+验证通过后登记全局活跃会话表（同一玩家 UUID 同时只允许一个会话，防玩家加入多个 slave）并签发
+身份断言。
+
+草案消息（消息 type 与字段在实现时冻结并做 golden 测试；按 AGENTS.md 约定，新增消息 type 必须
+在同一个提交中更新本文档与两侧实现）：
+
+### LOGIN_VERIFY_REQ（slave → master）
+
+    playerName / playerUuid / profileProperties
+    serverHash / sharedSecret（加密材料，供 master 调用 session server 验证）
+    slaveId / connectionInfo / nonce / sentAt
+
+### LOGIN_VERIFY_RES（master → slave）
+
+    VERIFIED（含 MasterVerifiedIdentity 断言：issuer/keyId/audience/expiresAt/sessionId/nonce/signature）
+    | REJECTED（reason：验证失败 / DUPLICATE_SESSION（已存在于其它 slave）/ 黑名单 / 吊销）
+
+### SESSION_CLOSED（slave → master）
+
+    playerUuid / sessionId / reason
+
+master 注销记账（防会话表泄漏）；玩家断开、切换落点、后端故障均需上报。
+
+约束：
+
+- 验证请求走 mTLS 受信通道，不经游戏端口；不进入 Minecraft 登录协议本身。
+- master 记账与落点判定的竞态（验证通过→玩家真正进入后端之间）需两阶段确认或持有锁，避免双通过。
+- offline 模式（开发/测试）：master 配置开关，verify=false 时直接放行但仍记账（沿用测试服务器惯例）。
+- 重复会话策略（拒新 / 踢旧）与“源服 + 一个缓存后端同时在线”是否允许，由部署策略定案。

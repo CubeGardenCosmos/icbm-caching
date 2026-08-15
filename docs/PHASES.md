@@ -1,107 +1,91 @@
 # 阶段性任务与验收条件
 
-状态：阶段0-2 完成，阶段3 完成（阶段4+ 未开始）
+状态：阶段1（架构修正：master 统筹中心 + slave Fabric 模组化 + Auth Gateway 归位）文档层落地；
+      原阶段 0-3 的成果作为已完成基线保留（不再以阶段编号呈现）。
 原则：先证明源服权威性和回滚正确性，再扩大可预测操作和优化性能。
 
-## 阶段 0：26.3 版本冻结
+## 已完成基线（原阶段 0-3 成果，保留）
 
-- [x] 记录完整 Minecraft 26.3 构建、运行时 protocol、Java、Velocity、Fabric Loader、Fabric API 和 mappings 版本（见 [VERSION_FREEZE.md](VERSION_FREEZE.md)；Velocity 版本待 slave 阶段记录）。
-- [x] 固定源服模组、配置、数据包和生成设置，并计算 modpack/registry/datapack fingerprint。
-      实现 modpackFingerprint 与 registryAndDatapackFingerprint（注册表 key+entry id + 数据包
-      内容哈希）；实际值部署时记录于 VERSION_FREEZE.md / build/workspace/fingerprints.json。
-- [ ] 建立源 Fabric、master 缓存目录、slave Velocity、虚拟后端和控制服务的隔离实验环境。
-      （源 Fabric、master 控制服务与 mTLS 证书就绪，`build/main.py control` 启动；slave
-      Velocity 路由与虚拟后端随阶段 3/4）
-- [x] 建立 master 与至少两个地区 slave 的 mTLS 控制平面，验证 slave 之间不互信。
-      证书 CN 绑定角色（source-server=SOURCE / slave-a、slave-b=VELOCITY）；slave 只与 master
-      对话，SOURCE 角色独占写入消息（角色违规断连测试覆盖）。
-- [ ] 部署独立 Auth Gateway；它是唯一执行 Mojang 正版验证的组件。
-- [ ] 确定玩家入口：默认 Auth Gateway -> master -> slave；只有在 master ticket 可安全兑换时才允许直接连接 slave。
-- [ ] 准备覆盖普通方块、方块实体、液体、活塞、红石、命令、世界生成和模组修改的测试世界。
+- [x] 26.3 版本冻结与指纹（原阶段0）：Minecraft 26.3-snapshot-8、runtime protocol 1073742154、
+      DataVersion 5010、Java 25、Fabric Loader 0.19.3、Fabric API 0.157.1+26.3；
+      modpackFingerprint 与 registryAndDatapackFingerprint 计算与记录。
+- [x] 源 Fabric worldEpoch / chunk revision / 快照提交（原阶段1，本修正后不再单列阶段，仍为权威基线）：
+      SourceState 持久化、markUnsaved 权威路径 Mixin、tick 末合并、required/committed 提交流程，
+      重启不倒退、未修改邻居不递增、真实落盘验证。
+- [x] 后台控制协议与对象库（原阶段2）：mTLS 控制平面、包络/消息编解码、HELLO 指纹、
+      WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/RESOLVE_CHUNK、master→多 slave 订阅/流控/滞后/重拉、
+      SnapshotObjectStore 磁盘对象库（required/committed 单调、损坏 fail closed）。
+- [x] 26.3 旁观会话技术（原阶段3）：独立 netty 后端状态机、区块/方块实体/光照编码、注册表转储
+      golden 资源、ServeGate fail closed（作为 slave Fabric 模组化的技术基础）。
 
-验收：
+## 阶段 1：架构修正（本次修正）
 
-- [ ] 所有运行时组件记录相同的 26.3 兼容性清单。
-- [ ] 任一模组或数据包变动都被判定为新 fingerprint。
-- [ ] 任一 slave 只能连接受信任 master，不能把另一个 slave 作为身份或快照来源。
+master 为统筹中心，slave 为 Fabric 模组后端；Auth Gateway 归 master。
 
-## 阶段 1：源 Fabric revision 与快照
-
-- [x] 实现 worldEpoch 和 chunk revision 的持久化（`SourceState` + `SavedDataType` codec；重启恢复/损坏回退见验收）。
-- [x] 接入 ServerChunkEvents、玩家破坏和方块实体事件作为诊断与早期 dirty 标记。
-- [x] 用 26.3 mappings 和字节码确认方块修改、chunk 脏标记和方块实体脏标记的 Mixin 目标（`ChunkAccess#markUnsaved` 唯一权威路径；`Level.blockEntityChanged`→markUnsaved；`ChunkHolder.sectionLightChanged`→markUnsaved；启动自检 fail closed）。
-- [x] 每 tick 合并 dirty chunk，一次性生成 revision 和稳定快照（`ChunkSnapshotTicker`；序列化/压缩走后台 executor，不阻塞 tick）。
-- [x] 实现先 requiredRevision 后 committedRevision 的对象提交流程（`SnapshotPublisher` 显式状态机 + `LocalSnapshotSink` 本地对象库，含哈希/大小/epoch/顺序校验）。
-
-验收：
-
-- [x] 玩家、刻、命令、活塞、液体、世界生成、方块实体和模组修改都会递增正确 chunk 的 revision（markUnsaved 权威路径覆盖全部；测试服务器 setblock 实测）。
-- [x] 未修改邻居不递增 revision（vanilla 光照传播视为真实修改，见 [PARITY.md](PARITY.md) #1）。
-- [x] 重启后 revision 不倒退；无法证明时产生新 epoch（单元测试 + 实盘落盘验证）。
-
-## 阶段 2：后台控制协议
-
-- [x] 按 CACHE_PROTOCOL.md 实现 mTLS、HELLO、WORLD_EPOCH、INVALIDATE、PUT_SNAPSHOT 和 RESOLVE_CHUNK。
-      共享协议模块（protocol/）+ 控制服务（control-service/）+ 源远端 sink + slave 复制客户端。
-- [x] 实现 schema、大小、哈希、序号、权限和 fingerprint 校验（golden 测试锁定线上布局）。
-- [x] 实现对象库、requiredRevision 与 committedRevision 的持久恢复（SnapshotObjectStore +
-      事件日志，重启恢复 + 损坏 fail closed）。
-- [x] 实现连接断开、补发、范围失效和 epoch 切换（outbox 重发、事件日志重放、ADMIN_INVALIDATE、
-      WORLD_EPOCH）。
-- [x] 实现 master 到多个 slave 的订阅、流量控制、滞后检测和快照重拉（SUBSCRIBE/ACK 窗口、
-      LAGGING 检测、RESYNC/日志重放）。
+- [x] 文档重定位：拓扑（玩家→slave→master→后端）、Auth Gateway 归位与会话记账、
+      slave 形态（原生 MC 服务器 + Fabric 模组，不做世界计算）、资源约束（256M JVM、缓存落磁盘）、
+      阶段体系重组（原阶段1 移除，本修正为新阶段1）。
+- [ ] velocity-plugin → master 统筹插件：白名单/fallback 落点判定、多服务器切换、
+      全局活跃会话记账、健康检查、身份断言签发与吊销（master 不作为可直接连接的普通代理）。
+- [ ] Auth Gateway 归 master：slave 终止登录握手后递验证材料，master 唯一验证 + 记账
+      （防同一玩家加入多个 slave），签发 MasterVerifiedIdentity；
+      LOGIN_VERIFY 系列消息定义与两侧实现（见 CACHE_PROTOCOL.md §9，协议变更随两侧同一提交）。
+- [ ] slave Fabric 模组（新组件）：原生 MC 服务器进程上接管游戏事件，只实现协议与部分预测，
+      不做世界计算；256M JVM 与磁盘缓存约束落地（按需装载、编码即释放、生成器禁用/替换、
+      独立世界目录禁 save、启动自检 fail closed）。
+- [ ] 控制平面端口规划定案：独立受信端口（现状）vs 打包进 25565 游戏端口（备选，含安全/隔离
+      评估结论），并同步 HIERARCHY §6 与 CACHE_PROTOCOL §1。
 
 验收：
 
-- [x] INVALIDATE 到 snapshot committed 之间，RESOLVE_CHUNK 不返回旧 HIT（控制服务集成测试）。
-- [x] 乱序、重放和损坏快照不能降低 revision 或覆盖新对象（对象库重放守卫 + wire 测试）。
-- [x] 控制服务不可用时，虚拟后端拒绝不确定基线（slave ServeGate fail closed；虚拟后端接入见阶段3）。
-- [x] 落后的 slave 不会服务低于 master requiredRevision 的区块（ServeGate STALE 测试）。
+- [ ] master 只被 slave 接入，玩家不能把它当普通代理直接游戏。
+- [ ] 同一玩家无法同时在多个 slave 建立会话（全局会话记账）。
+- [ ] slave 以 256M 堆启动并通过自检（不驻留区块、对象库落盘、静态数据懒加载）。
+- [ ] 文档中的拓扑/职责/约束与实现一致（AGENTS.md 组件归属同步）。
 
-## 阶段 3：虚拟后端旁观者会话
+## 阶段 2：源服权威与快照（基线保持，修复期）
 
-- [x] 实现 26.3 后端连接状态机的最小可用部分：configuration/play、registry、compression、keepalive、传送确认、chunk loading window 和断线清理。
-      （`virtual-backend/` 组件：netty 游戏监听 + 显式状态机 HANDSHAKE/STATUS/LOGIN/CONFIGURATION/PLAY；
-      压缩阈值 256、keepalive 15s、传送确认、Set Center Chunk 窗口/Unload；
-      草稿 `build/workspace/draft/phase3-virtual-backend`。）
-- [x] 实现 committed snapshot 的加载及 26.3 区块、方块实体和光照包编码。
-      （`ChunkDataEncoder`：高度图/LevelChunkSection/PalettedContainer 逐字节对齐 26.3；
-      方块实体 update tag 转换；光照 mask/更新列表；真实快照 golden 测试。）
-- [x] 只开放旁观者模式，拒绝所有世界互动。
-      （Join Game gameType=SPECTATOR + 能力包；互动包拒绝且不应用，无任何写路径。）
-- [x] 验证源服和虚拟后端的区块坐标、方块状态、biome、光照和方块实体渲染一致。
-      （构建期源服转储注册表/方块状态表为 golden 资源，启动指纹校验；
-      真实 26.3 快照 + 真实注册表编码测试锁定不变量。）
+原阶段1 能力按新架构复验与维护：
+
+- [ ] 新架构下源服 Mixin 目标、revision 持久化、快照发布与验证结论复验（无回归）。
+- [ ] 源服游戏端口仅接受受信节点（master/受信接入）的隔离验证。
 
 验收：
 
-- [x] 玩家在虚拟后端移动时不建立到源服的游戏后端会话。
-      （虚拟后端为独立进程，无任何到源服游戏端口的连接，仅经控制平面收快照。）
-- [x] 缓存未命中或 epoch/fingerprint 不匹配时不展示旧区块。
-      （`SnapshotRepository` ServeGate 语义：master 连接存活 + committed≥required + epoch 匹配才发送；
-      MISS/STALE/INCOMPATIBLE 一律不发送旧区块；启动指纹与转储 manifest 不一致 fail closed。）
-- [x] 虚拟后端不会写入 committed snapshot 或源服世界。
-      （对象库只读装载；控制平面仅 SUBSCRIBE/ACK；无操作提交通道。）
+- [ ] 玩家、刻、命令、活塞、液体、世界生成、方块实体和模组修改仍递增正确 chunk 的 revision。
+- [ ] 重启后 revision 不倒退；无法证明时产生新 epoch。
 
-## 阶段 4：Velocity 路由与运行观测
+## 阶段 3：master 统筹控制平面
 
-- [ ] 在 ProxyInitializeEvent 后初始化虚拟后端注册、控制服务客户端、命令和指标。
-- [ ] 实现 master 身份断言的验签、受众校验、短时过期、单次兑换和吊销处理。
-- [ ] 保证 slave 的监听端口策略与入口模式一致；未经 master 认证的客户端不能进入虚拟会话。
-- [ ] 实现玩家到虚拟后端的路由、健康检查和断路。
-- [ ] 记录 snapshot 命中、过期、加载时延、源服同步时延和虚拟后端会话数。
-- [ ] 确保 Velocity 事件线程上没有同步 RPC、磁盘 IO 或大对象反序列化。
+- [ ] master 插件实现落点判定（白名单/fallback）与多服务器切换（fallback、/server、transfer）。
+- [ ] 全局会话记账：验证通过登记、登出/断开注销、竞态两阶段确认、重复会话踢旧/拒新策略。
+- [ ] Auth Gateway 验证流程（LOGIN_VERIFY_REQ/RES）与身份断言签发/单次兑换/吊销。
+- [ ] 健康检查与断路器：后端不可用时落点 fallback，不服务不确定数据。
 
 验收：
 
-- [ ] 虚拟后端或控制服务故障时，路由安全失败且不服务不确定数据。
-- [ ] 指标能够按世界、维度和失败原因定位问题。
-- [ ] master/slave 的身份票据重放、跨 slave 转用、过期和吊销均被拒绝。
+- [ ] 玩家可在源服与 slave 后端之间切换，身份断言随会话传递且不重放。
+- [ ] 未经 master 验证的客户端无法进入任何后端；重复会话被拒绝。
+- [ ] 后端故障时路由安全失败且不服务不确定数据。
+
+## 阶段 4：slave 后端会话（Fabric 模组化）
+
+- [ ] slave 模组在原生 MC 服务器上实现 26.3 状态机与 committed snapshot 装载（迁移原阶段3 技术，
+      移除独立 netty 进程依赖或保留为只读变体）。
+- [ ] 世界计算禁用：生成器禁用/替换、tick 模拟裁剪、持久化写回禁止；启动自检 fail closed。
+- [ ] 256M 约束：磁盘对象库按需装载、编码即释放、静态数据懒加载、堆占用自检。
+- [ ] 只开放旁观者模式，拒绝所有世界互动（与 master 验证/记账联动）。
+
+验收：
+
+- [ ] 玩家移动不建立源服游戏会话；缓存未命中/epoch/fingerprint 不匹配不展示旧区块。
+- [ ] slave 不写入 committed snapshot 或源服世界；不产生本地生成区块。
+- [ ] 256M 堆下稳定运行（含长时间浏览与切换）。
 
 ## 阶段 5：单格乐观操作
 
 - [ ] 定义 operationId、virtualSessionId、client sequence、baseRevision 和状态哈希前置条件。
-- [ ] 虚拟后端以可丢弃 overlay 存储预测，不修改 committed snapshot。
+- [ ] slave 以可丢弃 overlay 存储预测（256M 约束：最小增量表示），不修改 committed snapshot。
 - [ ] 源 Fabric 模组在主线程实现幂等操作队列和原子前置条件检查。
 - [ ] 只开放无容器、无实体、无流体、无红石、无跨 chunk 副作用的 BREAK/PLACE。
 - [ ] 实现 OPERATION_COMMITTED 和 OPERATION_REJECTED。
@@ -127,14 +111,14 @@
 ## 阶段 7：故障、回归与性能
 
 - [ ] 构建 26.3 golden snapshot、协议状态机和 Mixin 启动自检。
-- [ ] 模拟源服回档、源服/控制服务重启、网络分区、消息重放、缓存损坏和虚拟后端故障。
-- [ ] 压测多玩家移动、热点区块与高冲突操作。
+- [ ] 模拟源服回档、源服/控制服务重启、网络分区、消息重放、缓存损坏和 slave 故障。
+- [ ] 压测多玩家移动、热点区块与高冲突操作；256M 堆压力测试。
 - [ ] 正确性通过后再优化热区索引、磁盘分层、压缩、批处理和预热。
 
 验收：
 
 - [ ] 所有故障结果只有“权威最新状态”“完整权威回滚”或“停止使用不确定基线”。
-- [ ] 性能优化关闭后仍保留全部一致性保证。
+- [ ] 性能优化关闭后仍保留全部一致性保证；256M 约束不因优化开启而失效。
 
 ## 阻塞条件
 
@@ -142,6 +126,7 @@
 
 - 26.3 mappings 与 Mixin 目标未经实际验证。
 - 存在未覆盖的 chunk dirty 或方块实体变更路径。
-- 虚拟后端与源服的 fingerprint 不一致。
+- slave 与源服的 fingerprint 不一致。
 - 缓存对象未达到对应 committedRevision。
-- 某个操作类型没有完整 state resync plan，却试图在虚拟后端执行。
+- 某个操作类型没有完整 state resync plan，却试图在 slave 执行。
+- slave 的 256M 堆自检未通过（内存预算未被证明）。
