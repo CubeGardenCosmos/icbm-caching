@@ -214,7 +214,10 @@ public final class ControlSessionLogic implements ControlSession {
             }
             case ADMIN_INVALIDATE -> this.service.onAdminInvalidate(this, decodeBody(type, envelope.body()));
             case SESSION_CLOSED -> this.service.onSessionClosed(this, decodeBody(type, envelope.body()));
-            case RESYNC_RES, PUT_SNAPSHOT_ACK, HELLO, HELLO_ACK, SNAPSHOT_PUSH, ERROR -> {
+            case SUBMIT_OPERATION -> this.service.onSubmitOperation(this, decodeBody(type, envelope.body()));
+            case GET_OPERATION_STATUS -> this.service.onGetOperationStatus(this, decodeBody(type, envelope.body()));
+            case RESYNC_RES, PUT_SNAPSHOT_ACK, HELLO, HELLO_ACK, SNAPSHOT_PUSH, ERROR,
+                    OPERATION_COMMITTED, OPERATION_REJECTED, OPERATION_STATUS_RES -> {
                 throw new ProtocolViolation("对端发送了不应由客户端发送的类型: " + type);
             }
         }

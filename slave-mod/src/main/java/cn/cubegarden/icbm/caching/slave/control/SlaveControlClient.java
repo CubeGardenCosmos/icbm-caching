@@ -49,12 +49,15 @@ public final class SlaveControlClient implements AutoCloseable {
     private final String fabricApiVersion;
     private final String modpackFingerprint;
     private final String registryAndDatapackFingerprint;
+    private volatile net.minecraft.server.MinecraftServer serverRef;
 
     private volatile long lastAckedSequence;
     private int receivedSinceAck;
     private final Object verifyLock = new Object();
     private CountDownLatch verifyPending;
     private Messages.LoginVerifyRes verifyResult;
+    private volatile OperationListener operationListener;
+    private volatile cn.cubegarden.icbm.caching.slave.world.SnapshotReloader snapshotReloader;
 
     public SlaveControlClient(
             SlaveConfig config,
@@ -89,7 +92,9 @@ public final class SlaveControlClient implements AutoCloseable {
                 new EncapsulatedChannelClient.HelloConfig(Role.SLAVE, config.serverName(),
                         minecraftVersion, runtimeProtocol, fabricLoaderVersion, fabricApiVersion,
                         modpackFingerprint, registryAndDatapackFingerprint, (byte) 0),
-                config.readTimeoutMillis(), config.reconnectBackoffMillis(), true, new ChannelListener());
+                EncapsulatedChannelClient.HandshakeMode.CLIENT_HELLO,
+                config.readTimeoutMillis(), config.reconnectBackoffMillis(), true,
+                config.heartbeatIntervalMillis(), new ChannelListener());
     }
 
     public void start() {
@@ -142,6 +147,42 @@ public final class SlaveControlClient implements AutoCloseable {
                         new Messages.SessionClosed(playerUuid, sessionId, reason)));
     }
 
+    /** 乐观操作终态回调（里程碑 7 阶段 5；由装配方设置）。 */
+    public interface OperationListener {
+        void onCommitted(Messages.OperationCommitted committed);
+
+        void onRejected(Messages.OperationRejected rejected);
+
+        void onStatusRes(Messages.OperationStatusRes res);
+    }
+
+    public void setOperationListener(OperationListener listener) {
+        this.operationListener = listener;
+    }
+
+    /** 装配快照刷新器（快照到达后重载已装载区块；null = 不刷新）。 */
+    public void setSnapshotReloader(cn.cubegarden.icbm.caching.slave.world.SnapshotReloader reloader) {
+        this.snapshotReloader = reloader;
+    }
+
+    /** 注入服务器引用（快照刷新用；由 SlaveMod 装配）。 */
+    public void setServerRef(net.minecraft.server.MinecraftServer server) {
+        this.serverRef = server;
+    }
+
+    /** 提交乐观操作（源服主线程幂等裁决；overlay 预测由装配方登记）。 */
+    public boolean submitOperation(Messages.SubmitOperation op) {
+        return this.channel.send(MessageType.SUBMIT_OPERATION, this.requestIds.incrementAndGet(), 0,
+                EncapsulatedChannelClient.encode(MessageType.SUBMIT_OPERATION, op));
+    }
+
+    /** 超时后查询操作终态（操作超时不等于失败；终态确定前预测不得视为权威）。 */
+    public boolean getOperationStatus(byte[] operationId) {
+        return this.channel.send(MessageType.GET_OPERATION_STATUS, this.requestIds.incrementAndGet(), 0,
+                EncapsulatedChannelClient.encode(MessageType.GET_OPERATION_STATUS,
+                        new Messages.GetOperationStatus(operationId)));
+    }
+
     /** 等待首轮初始同步（master 连接 + WORLD_EPOCH/首个快照到达）。Server thread 在
      *  装载 spawn 区块前调用：ServeGate 语义要求先同步基线再服务区块（未同步 → 装载
      *  命中空 EMPTY，之后无官方重载 API）。超时返回 false（不阻断启动，区块装载可能
@@ -188,6 +229,12 @@ public final class SlaveControlClient implements AutoCloseable {
             try {
                 this.store.commit(key, snapshot.revision());
                 LOGGER.info("[icbm-slave] 已装载快照: {} rev={} epoch={}", key, snapshot.revision(), epoch);
+                // 快照到达：已装载区块需刷新（乐观操作 COMMITTED 后新状态展示给玩家视角）
+                cn.cubegarden.icbm.caching.slave.world.SnapshotReloader reloader = this.snapshotReloader;
+                if (reloader != null) {
+                    reloader.onChunkUpdated(snapshot.dimension(),
+                            snapshot.chunkX(), snapshot.chunkZ());
+                }
             } catch (IllegalStateException e) {
                 LOGGER.error("[icbm-slave] committed 失败（fail closed）: {}: {}", key, e.getMessage());
             }
@@ -257,6 +304,12 @@ public final class SlaveControlClient implements AutoCloseable {
                             EncapsulatedChannelClient.decode(MessageType.WORLD_EPOCH, body), envelope.sequence());
                     case SNAPSHOT_PUSH -> SlaveControlClient.this.handleSnapshotPush(
                             EncapsulatedChannelClient.decode(MessageType.SNAPSHOT_PUSH, body), envelope, envelope.sequence());
+                    case OPERATION_COMMITTED -> SlaveControlClient.this.notifyCommitted(
+                            EncapsulatedChannelClient.decode(MessageType.OPERATION_COMMITTED, body));
+                    case OPERATION_REJECTED -> SlaveControlClient.this.notifyRejected(
+                            EncapsulatedChannelClient.decode(MessageType.OPERATION_REJECTED, body));
+                    case OPERATION_STATUS_RES -> SlaveControlClient.this.notifyStatusRes(
+                            EncapsulatedChannelClient.decode(MessageType.OPERATION_STATUS_RES, body));
                     case HEARTBEAT -> SlaveControlClient.this.ack(envelope.sequence());
                     case ERROR -> LOGGER.error("[icbm-slave] master 错误: {}",
                             EncapsulatedChannelClient.<Messages.ErrorMessage>decode(MessageType.ERROR, body).reason());
@@ -265,6 +318,36 @@ public final class SlaveControlClient implements AutoCloseable {
             } catch (Exception e) {
                 LOGGER.error("[icbm-slave] 处理推送失败（fail closed，保持现有状态）: {}", e.toString());
             }
+        }
+    }
+
+    private void notifyCommitted(Messages.OperationCommitted committed) {
+        OperationListener listener = this.operationListener;
+        if (listener != null) {
+            listener.onCommitted(committed);
+        } else {
+            LOGGER.warn("[icbm-slave] OPERATION_COMMITTED 无回调（overlay 未装配）: op={}",
+                    java.util.HexFormat.of().formatHex(committed.operationId()));
+        }
+    }
+
+    private void notifyRejected(Messages.OperationRejected rejected) {
+        OperationListener listener = this.operationListener;
+        if (listener != null) {
+            listener.onRejected(rejected);
+        } else {
+            LOGGER.warn("[icbm-slave] OPERATION_REJECTED 无回调（overlay 未装配）: op={}",
+                    java.util.HexFormat.of().formatHex(rejected.operationId()));
+        }
+    }
+
+    private void notifyStatusRes(Messages.OperationStatusRes res) {
+        OperationListener listener = this.operationListener;
+        if (listener != null) {
+            listener.onStatusRes(res);
+        } else {
+            LOGGER.warn("[icbm-slave] OPERATION_STATUS_RES 无回调（overlay 未装配）: op={}",
+                    java.util.HexFormat.of().formatHex(res.operationId()));
         }
     }
 

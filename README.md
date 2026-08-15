@@ -25,6 +25,7 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
   单端口封装通道、required/committed revision 快照聚合。独立进程形态入口 `ControlServiceMain`
   （Velocity 插件入口于阶段 6/7 端到端装配）。
 - **slave（`slave-mod/`）**：原生 MC 服务器进程上的 Fabric 模组（只做协议与预测，不做世界计算）；
+  初始同步闸门 + 出生点快照强制装载 + 乐观操作可丢弃 overlay + 快照到达刷新已装载区块
   对象库命中注入 FULL 快照区块（SerializableChunkData 解析），未命中/落后/epoch 不匹配 fail closed
   （EMPTY 不生成 + 玩家移动边界拦截）；旁观（互动拒绝）；禁持久化；SLAVE 角色封装通道客户端
   （订阅/ACK/LOGIN_VERIFY 递交）；256M JVM 约束；F3 品牌可配置（icbm.brandLocation，

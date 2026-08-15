@@ -92,6 +92,14 @@ public final class SourceConnector implements AutoCloseable {
         return this.client.sendMcPassthrough(body);
     }
 
+    /** 发送控制消息到源服（乐观操作提交/状态查询转发；断连返回 false）。 */
+    public boolean send(MessageType type, long requestId, byte[] body) {
+        if (!this.client.isConnected()) {
+            return false;
+        }
+        return this.client.send(type, requestId, 0, body);
+    }
+
     @Override
     public void close() {
         this.client.close();
@@ -191,6 +199,15 @@ public final class SourceConnector implements AutoCloseable {
                     }
                     case ERROR -> LOGGER.error("[control] 源服错误: {}",
                             EncapsulatedChannelClient.<Messages.ErrorMessage>decode(MessageType.ERROR, body).reason());
+                    case OPERATION_COMMITTED -> SourceConnector.this.service.onOperationCommitted(
+                            SourceConnector.this.adapter,
+                            EncapsulatedChannelClient.decode(MessageType.OPERATION_COMMITTED, body));
+                    case OPERATION_REJECTED -> SourceConnector.this.service.onOperationRejected(
+                            SourceConnector.this.adapter,
+                            EncapsulatedChannelClient.decode(MessageType.OPERATION_REJECTED, body));
+                    case OPERATION_STATUS_RES -> SourceConnector.this.service.onOperationStatusRes(
+                            SourceConnector.this.adapter,
+                            EncapsulatedChannelClient.decode(MessageType.OPERATION_STATUS_RES, body));
                     default -> LOGGER.warn("[control] 忽略来自源服的类型: {}", type);
                 }
             } catch (Exception e) {

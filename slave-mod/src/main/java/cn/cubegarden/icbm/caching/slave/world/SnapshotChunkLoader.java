@@ -13,7 +13,9 @@ import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.storage.SerializableChunkData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +54,41 @@ public final class SnapshotChunkLoader {
 
     public boolean masterConnected() {
         return this.masterConnected;
+    }
+
+    /**
+     * 刷新已装载区块：重新解析对象库最新快照 → 逐方块应用到已装载 LevelChunk
+     * （flags=0 不触发方块事件；slave 装载 committed snapshot 语义——非世界计算/非写回）。
+     * 卸载路径（SnapshotReloader）因引用不降 0（saveSync 依赖未完成）卡住时的兜底。
+     * 在 Server thread 调用。返回 true 表示已应用；false = 无新快照/装载失败（保持现状）。
+     */
+    public boolean refreshLoaded(ServerLevel level, ChunkPos pos) {
+        ChunkAccess fresh = this.loadChunk(level, pos);
+        if (fresh == null) {
+            return false;
+        }
+        net.minecraft.world.level.chunk.LevelChunk loaded = level.getChunkSource().getChunkNow(pos.x(), pos.z());
+        if (loaded == null) {
+            return false;
+        }
+        int minX = pos.getMinBlockX();
+        int minZ = pos.getMinBlockZ();
+        for (int y = level.getMinY(); y < level.getMaxY(); y++) {
+            for (int z = 0; z < 16; z++) {
+                for (int x = 0; x < 16; x++) {
+                    net.minecraft.core.BlockPos blockPos =
+                            new net.minecraft.core.BlockPos(minX + x, y, minZ + z);
+                    BlockState state = fresh.getBlockState(blockPos);
+                    BlockState current = loaded.getBlockState(blockPos);
+                    if (state != current) {
+                        loaded.setBlockState(blockPos, state,
+                                net.minecraft.world.level.block.Block.UPDATE_NONE);
+                    }
+                }
+            }
+        }
+        LOGGER.info("[icbm-slave] 区块刷新: 已就地应用快照 {},{}", pos.x(), pos.z());
+        return true;
     }
 
     /** 区块是否可服务（ServeGate 判定，不解析）：玩家移动边界用。 */

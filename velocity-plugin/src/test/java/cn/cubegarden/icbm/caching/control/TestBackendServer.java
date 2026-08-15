@@ -50,6 +50,13 @@ public final class TestBackendServer implements AutoCloseable {
     final CountDownLatch helloAcked = new CountDownLatch(1);
     final CountDownLatch putAckReceived = new CountDownLatch(1);
     final List<byte[]> receivedMcPackets = new CopyOnWriteArrayList<>();
+    final List<Messages.SubmitOperation> receivedOperations = new CopyOnWriteArrayList<>();
+    final List<Messages.GetOperationStatus> receivedStatusQueries = new CopyOnWriteArrayList<>();
+    final java.util.concurrent.CountDownLatch operationReceived = new java.util.concurrent.CountDownLatch(1);
+    /** 测试预设：收到 SUBMIT_OPERATION 后回发的终态（默认 COMMITTED diamond）。 */
+    volatile Messages.OperationCommitted committedReply = new Messages.OperationCommitted(
+            new byte[16], "minecraft:diamond_block", 7, 1, System.currentTimeMillis());
+    volatile Messages.OperationRejected rejectedReply;
     final AtomicLong sequence = new AtomicLong();
     volatile boolean accepted;
     volatile boolean connected;
@@ -109,6 +116,37 @@ public final class TestBackendServer implements AutoCloseable {
                             Messages.PutSnapshotAck ack = decode(MessageType.PUT_SNAPSHOT_ACK, env.body());
                             this.events.add("put_ack:" + ack.result());
                             this.putAckReceived.countDown();
+                        } else if (env.messageType() == MessageType.SUBMIT_OPERATION) {
+                            Messages.SubmitOperation op = decode(MessageType.SUBMIT_OPERATION, env.body());
+                            this.receivedOperations.add(op);
+                            this.operationReceived.countDown();
+                            this.events.add("submit_operation:" + java.util.HexFormat.of().formatHex(op.operationId()));
+                            Messages.OperationRejected rejected = this.rejectedReply;
+                            if (rejected != null) {
+                                this.send(MessageType.OPERATION_REJECTED, 0, 0,
+                                        encode(MessageType.OPERATION_REJECTED,
+                                                new Messages.OperationRejected(op.operationId(),
+                                                        rejected.reason(), op.dimension(),
+                                                        rejected.resyncChunkX(), rejected.resyncChunkZ(),
+                                                        System.currentTimeMillis())));
+                            } else {
+                                this.send(MessageType.OPERATION_COMMITTED, 0, 0,
+                                        encode(MessageType.OPERATION_COMMITTED,
+                                                new Messages.OperationCommitted(op.operationId(),
+                                                        this.committedReply.canonicalState(),
+                                                        this.committedReply.chunkRevision(),
+                                                        this.committedReply.epoch(),
+                                                        System.currentTimeMillis())));
+                            }
+                        } else if (env.messageType() == MessageType.GET_OPERATION_STATUS) {
+                            Messages.GetOperationStatus req = decode(MessageType.GET_OPERATION_STATUS, env.body());
+                            this.receivedStatusQueries.add(req);
+                            this.send(MessageType.OPERATION_STATUS_RES, 0, 0,
+                                    encode(MessageType.OPERATION_STATUS_RES,
+                                            new Messages.OperationStatusRes(req.operationId(),
+                                                    Messages.OperationStatusRes.OperationStatus.COMMITTED,
+                                                    "minecraft:diamond_block", 7, "",
+                                                    DIM, new int[0], new int[0])));
                         }
                     } else if (decrypted.stream() == StreamId.MC_PASSTHROUGH) {
                         this.receivedMcPackets.add(decrypted.body());

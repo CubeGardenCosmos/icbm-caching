@@ -71,7 +71,14 @@ public final class IcbmSource implements ModInitializer {
                     service, publisher, tracker, gate, registryFingerprint);
             ticker.announceInitialEpochs();
 
-            SourceRuntime.install(new SourceRuntime(gate, service, tracker, publisher, ticker));
+            // 乐观操作（里程碑 7 阶段 5）：主线程队列 + 模拟玩家裁决；结果经 sink 回发
+            cn.cubegarden.icbm.caching.source.operation.OperationQueue operationQueue =
+                    new cn.cubegarden.icbm.caching.source.operation.OperationQueue(
+                            new cn.cubegarden.icbm.caching.source.operation.OperationAdjudicator(
+                                    tracker, service),
+                            sink::sendOperationResult);
+
+            SourceRuntime.install(new SourceRuntime(gate, service, tracker, publisher, ticker, operationQueue));
             LOGGER.info("[icbm-source] 运行时就绪：gate={} epoch={} sink={}",
                     gate.isEnabled(), service.epochFor(Level.OVERWORLD.identifier()),
                     sink.getClass().getSimpleName());
@@ -81,6 +88,9 @@ public final class IcbmSource implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             SourceRuntime runtime = SourceRuntime.current();
             if (runtime != null) {
+                // 操作裁决先于快照序列化：同一 tick 的 dirty 必须在操作执行后序列化
+                // （否则 rev 快照内容是操作前状态——里程碑 7 e2e 暴露）
+                runtime.operationQueue().onEndServerTick(server);
                 runtime.ticker().onEndServerTick(server);
             }
         });

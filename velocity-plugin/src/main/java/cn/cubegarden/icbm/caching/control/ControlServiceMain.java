@@ -85,6 +85,9 @@ public final class ControlServiceMain {
             bridge.attachSourceConnector(sourceConnector);
         }
         SourceConnector sourceRef = sourceConnector;
+        if (sourceConnector != null) {
+            service.setSourceConnector(sourceConnector);
+        }
 
         java.util.concurrent.CountDownLatch shutdown = new java.util.concurrent.CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

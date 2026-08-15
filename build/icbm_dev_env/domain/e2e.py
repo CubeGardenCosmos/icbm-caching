@@ -225,11 +225,18 @@ def run_e2e() -> int:
         _wait_log(SLAVE_LOG, "master 已连接", 60, "slave↔master")
         _wait_log(SLAVE_LOG, "已装载快照", 60, "slave 快照注入")
 
-        # 5) RCON：玩家视角 = /data get block 读取注入区块
+        # 5) RCON：玩家视角 = execute if block 读取注入区块（里程碑 6 端到端命中）
         _wait_port("127.0.0.1", RCON_PORT, 60, "slave RCON")
         rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
         try:
-            result = rcon.command("execute if block 0 64 0 minecraft:diamond_block")
+            # force 装载出生点区块是异步的：轮询等 diamond 出现（注入完成）
+            result = ""
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                result = rcon.command("execute if block 0 64 0 minecraft:diamond_block")
+                if "Test passed" in result or "Success" in result:
+                    break
+                time.sleep(2)
             print(f"  [RCON] execute if block 0 64 0 diamond_block → {result!r}")
             if "Test passed" not in result and "Success" not in result:
                 raise RuntimeError(f"注入区块方块不是 diamond_block: {result!r}")
@@ -237,7 +244,30 @@ def run_e2e() -> int:
         finally:
             rcon.close()
 
-        # 6) fail closed：停止 master → slave 服务闸门关闭
+        # 6) 乐观操作闭环（里程碑 7）：slave 经 RCON 触发 BREAK → master → 源服主线程裁决
+        #    → OPERATION_COMMITTED → 快照管道 → slave 展示 air
+        rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
+        try:
+            result = rcon.command("icbmslave operate 0 64 0 break")
+            print(f"  [RCON] icbmslave operate 0 64 0 break → {result!r}")
+            if "已提交操作" not in result:
+                raise RuntimeError(f"slave 操作提交失败: {result!r}")
+            _wait_log(SLAVE_LOG, "操作已提交", 60, "slave 操作终态")
+            # 源服权威执行后经快照管道覆盖 slave → 玩家视角看到 air
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                verify = rcon.command("execute if block 0 64 0 minecraft:air")
+                if "Test passed" in verify or "Success" in verify:
+                    break
+                time.sleep(2)
+            print(f"  [RCON] execute if block 0 64 0 air → {verify!r}")
+            if "Test passed" not in verify and "Success" not in verify:
+                raise RuntimeError(f"操作后 0,64,0 不是 air: {verify!r}")
+            print("  [RCON] 玩家经 slave 看到的操作效果 = 源服权威裁决结果（乐观操作闭环）")
+        finally:
+            rcon.close()
+
+        # 7) fail closed：停止 master → slave 服务闸门关闭
         proc = procs.pop(1)  # master
         proc.terminate()
         try:

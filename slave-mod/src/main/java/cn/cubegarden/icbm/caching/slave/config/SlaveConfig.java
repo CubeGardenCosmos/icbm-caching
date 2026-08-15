@@ -44,6 +44,7 @@ public final class SlaveConfig {
     private final int viewDistance;
     private final long readTimeoutMillis;
     private final long reconnectBackoffMillis;
+    private final long heartbeatIntervalMillis;
     private final boolean selfcheck;
     private final String brandLocation;
 
@@ -58,6 +59,7 @@ public final class SlaveConfig {
         this.viewDistance = b.viewDistance;
         this.readTimeoutMillis = b.readTimeoutMillis;
         this.reconnectBackoffMillis = b.reconnectBackoffMillis;
+        this.heartbeatIntervalMillis = b.heartbeatIntervalMillis;
         this.selfcheck = b.selfcheck;
         this.brandLocation = b.brandLocation;
     }
@@ -87,6 +89,9 @@ public final class SlaveConfig {
         int view = Integer.parseInt(props.getProperty("control.viewDistance", "8"));
         long readTimeout = Long.parseLong(props.getProperty("control.readTimeoutMillis", "30000"));
         long backoff = Long.parseLong(props.getProperty("control.reconnectBackoffMillis", "3000"));
+        // 心跳 < master 读超时（HELLO_TIMEOUT_MILLIS=10s，EncapsulatedControlServer 未放宽）：
+        // slave 必须主动保活，否则 master 误断（里程碑 7 端到端暴露）
+        long heartbeat = Long.parseLong(props.getProperty("control.heartbeatIntervalMillis", "8000"));
         boolean selfcheck = Boolean.parseBoolean(props.getProperty("control.selfcheck", "true"));
         String brandLocation = props.getProperty("icbm.brandLocation", "").trim();
         Builder b = new Builder()
@@ -95,6 +100,7 @@ public final class SlaveConfig {
                 .storeRoot(worldRoot.resolve(storeRoot))
                 .dimensions(dimensions).viewDistance(view)
                 .readTimeoutMillis(readTimeout).reconnectBackoffMillis(backoff)
+                .heartbeatIntervalMillis(heartbeat)
                 .selfcheck(selfcheck).brandLocation(brandLocation);
         SlaveConfig config = b.build();
         LOGGER.info("[icbm-slave] 配置: master={}:{} serverName={} dims={} storeRoot={} viewDistance={}",
@@ -143,6 +149,11 @@ public final class SlaveConfig {
         return this.reconnectBackoffMillis;
     }
 
+    /** 心跳间隔（对 master 保活；须小于 master 侧读超时）。 */
+    public long heartbeatIntervalMillis() {
+        return this.heartbeatIntervalMillis;
+    }
+
     public boolean selfcheck() {
         return this.selfcheck;
     }
@@ -166,6 +177,7 @@ public final class SlaveConfig {
         private int viewDistance = 8;
         private long readTimeoutMillis = 30_000;
         private long reconnectBackoffMillis = 3_000;
+        private long heartbeatIntervalMillis = 8_000;
         private boolean selfcheck = true;
         private String brandLocation = "";
 
@@ -216,6 +228,11 @@ public final class SlaveConfig {
 
         public Builder reconnectBackoffMillis(long v) {
             this.reconnectBackoffMillis = v;
+            return this;
+        }
+
+        public Builder heartbeatIntervalMillis(long v) {
+            this.heartbeatIntervalMillis = v;
             return this;
         }
 

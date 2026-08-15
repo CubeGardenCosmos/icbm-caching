@@ -112,7 +112,18 @@ class FrameCodecTest {
                         new Messages.ProfileProperty[] {new Messages.ProfileProperty(
                                 "textures", "eyJ0ZXh0dXJlcyI6e30=", "sig")})),
                 new Messages.LoginVerifyRes(false, "验证失败", null),
-                new Messages.SessionClosed(new byte[16], "sess-1", "disconnect")
+                new Messages.SessionClosed(new byte[16], "sess-1", "disconnect"),
+                new Messages.SubmitOperation(new byte[16], new byte[16], "sess-1", 7,
+                        Messages.OperationType.PLACE, dim, 1, 64, -3, 5,
+                        "sha256-state", "minecraft:diamond_block", 1_700_000_000_000L),
+                new Messages.OperationCommitted(new byte[16], "minecraft:diamond_block", 6, 1, 1_700_000_000_100L),
+                new Messages.OperationRejected(new byte[16], "precondition-mismatch", dim,
+                        new int[] {0}, new int[] {0}, 1_700_000_000_100L),
+                new Messages.GetOperationStatus(new byte[16]),
+                new Messages.OperationStatusRes(new byte[16],
+                        Messages.OperationStatusRes.OperationStatus.COMMITTED,
+                        "minecraft:diamond_block", 6, "", dim,
+                        new int[0], new int[0])
         };
         MessageType[] types = new MessageType[] {
                 MessageType.HELLO, MessageType.HELLO_ACK, MessageType.WORLD_EPOCH,
@@ -121,7 +132,10 @@ class FrameCodecTest {
                 MessageType.SNAPSHOT_PUSH, MessageType.ACK, MessageType.RESYNC_REQ,
                 MessageType.RESYNC_RES, MessageType.HEARTBEAT, MessageType.ADMIN_INVALIDATE,
                 MessageType.ERROR, MessageType.LOGIN_VERIFY_REQ, MessageType.LOGIN_VERIFY_RES,
-                MessageType.LOGIN_VERIFY_RES, MessageType.SESSION_CLOSED
+                MessageType.LOGIN_VERIFY_RES, MessageType.SESSION_CLOSED,
+                MessageType.SUBMIT_OPERATION, MessageType.OPERATION_COMMITTED,
+                MessageType.OPERATION_REJECTED, MessageType.GET_OPERATION_STATUS,
+                MessageType.OPERATION_STATUS_RES
         };
         for (int i = 0; i < samples.length; i++) {
             byte[] body = encodeBody(types[i], samples[i]);
@@ -202,6 +216,54 @@ class FrameCodecTest {
             assertArrayEquals(e.playerUuid(), a.playerUuid());
             assertEquals(e.sessionId(), a.sessionId());
             assertEquals(e.reason(), a.reason());
+            return;
+        }
+        if (expected instanceof Messages.SubmitOperation e && actual instanceof Messages.SubmitOperation a) {
+            assertArrayEquals(e.operationId(), a.operationId());
+            assertArrayEquals(e.playerId(), a.playerId());
+            assertEquals(e.virtualSessionId(), a.virtualSessionId());
+            assertEquals(e.clientInteractionSequence(), a.clientInteractionSequence());
+            assertEquals(e.operationType(), a.operationType());
+            assertEquals(e.dimension(), a.dimension());
+            assertEquals(e.posX(), a.posX());
+            assertEquals(e.posY(), a.posY());
+            assertEquals(e.posZ(), a.posZ());
+            assertEquals(e.baseRevision(), a.baseRevision());
+            assertEquals(e.preconditions(), a.preconditions());
+            assertEquals(e.placeState(), a.placeState());
+            assertEquals(e.sentAt(), a.sentAt());
+            return;
+        }
+        if (expected instanceof Messages.OperationCommitted e && actual instanceof Messages.OperationCommitted a) {
+            assertArrayEquals(e.operationId(), a.operationId());
+            assertEquals(e.canonicalState(), a.canonicalState());
+            assertEquals(e.chunkRevision(), a.chunkRevision());
+            assertEquals(e.epoch(), a.epoch());
+            assertEquals(e.committedAt(), a.committedAt());
+            return;
+        }
+        if (expected instanceof Messages.OperationRejected e && actual instanceof Messages.OperationRejected a) {
+            assertArrayEquals(e.operationId(), a.operationId());
+            assertEquals(e.reason(), a.reason());
+            assertEquals(e.dimension(), a.dimension());
+            assertArrayEquals(e.resyncChunkX(), a.resyncChunkX());
+            assertArrayEquals(e.resyncChunkZ(), a.resyncChunkZ());
+            assertEquals(e.rejectedAt(), a.rejectedAt());
+            return;
+        }
+        if (expected instanceof Messages.GetOperationStatus e && actual instanceof Messages.GetOperationStatus a) {
+            assertArrayEquals(e.operationId(), a.operationId());
+            return;
+        }
+        if (expected instanceof Messages.OperationStatusRes e && actual instanceof Messages.OperationStatusRes a) {
+            assertArrayEquals(e.operationId(), a.operationId());
+            assertEquals(e.status(), a.status());
+            assertEquals(e.canonicalState(), a.canonicalState());
+            assertEquals(e.chunkRevision(), a.chunkRevision());
+            assertEquals(e.rejectReason(), a.rejectReason());
+            assertEquals(e.dimension(), a.dimension());
+            assertArrayEquals(e.resyncChunkX(), a.resyncChunkX());
+            assertArrayEquals(e.resyncChunkZ(), a.resyncChunkZ());
             return;
         }
         assertEquals(expected, actual, "round-trip " + type);

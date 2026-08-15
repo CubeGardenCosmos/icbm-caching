@@ -22,7 +22,7 @@
   - init 末尾询问是否安装基础软件（Rust 工具链、Node、pi AI 工具）。
 - Python 工具由 uv 管理（`build/pyproject.toml`、`build/uv.lock`）；功能按分层拆分在 `build/icbm_dev_env/` 包内（入口 → 编排 → 领域功能 → 基础设施），`build/main.py` 只做 uv 自举与 CLI 分发，禁止向 `main.py` 堆逻辑。
 - 所有联网操作（git/urllib/Gradle/curl）遵循 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量；Gradle 步骤由脚本翻译为 JVM 代理参数。
-- 测试服务器：`build/main.py server` 启动 `build/workspace/server` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source/slave-mod）；`build/main.py control` 前台启动 master 控制服务（单端口封装通道 11420，PSK 与 UUID 角色绑定由 `build/main.py control` 生成到 `build/workspace/control-run/control.properties`；不使用 mTLS/证书）；`build/main.py slave` 启动 slave 服务器（`build/workspace/slave-server`，256M 堆）；`build/main.py e2e` 里程碑 6 端到端验证（源服 setblock → 快照 → master → slave → RCON 玩家视角 + fail closed，三个真实 Java 进程）。
+- 测试服务器：`build/main.py server` 启动 `build/workspace/server` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source/slave-mod）；`build/main.py control` 前台启动 master 控制服务（单端口封装通道 11420，PSK 与 UUID 角色绑定由 `build/main.py control` 生成到 `build/workspace/control-run/control.properties`；不使用 mTLS/证书）；`build/main.py slave` 启动 slave 服务器（`build/workspace/slave-server`，256M 堆）；`build/main.py e2e` 端到端验证（源服 setblock → 快照 → master → slave → RCON 玩家视角 + 乐观操作闭环（slave RCON BREAK → 源服裁决 → 快照 → slave 刷新 → 玩家视角）+ fail closed，三个真实 Java 进程）。
 - 环境重置与清理：`reinit`（删除 `build/workspace` 后重新完整部署，适合反编译结果被污染时）与 `cleanup`（删除 `build/workspace` 与各组件构建产物，腾出硬盘空间）均为破坏性操作，脚本会先请求确认。
 - `build/workspace/`、`build/.venv/`、各组件 `build/`、`.gradle/`、`run/` 目录被 Git 忽略。
 - 开发环境改动（如升级 Loom/Gradle/JDK 版本）需同步更新 `docs/VERSION_FREEZE.md`、`build/` 脚本与本文档。

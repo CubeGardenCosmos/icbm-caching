@@ -103,43 +103,52 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
 - [ ] slave 不写入 committed snapshot 或源服世界；不产生本地生成区块。
 - [ ] 256M 堆下稳定运行（含长时间浏览与切换）。
 
-## 阶段 5：单格乐观操作
+## 阶段 5：单格乐观操作（里程碑 7 完成）
 
-- [ ] 定义 operationId、virtualSessionId、client sequence、baseRevision 和状态哈希前置条件。
-- [ ] slave 以可丢弃 overlay 存储预测（256M 约束：最小增量表示），不修改 committed snapshot。
-- [ ] 源 Fabric 模组在主线程实现幂等操作队列和原子前置条件检查。
-- [ ] 只开放无容器、无实体、无流体、无红石、无跨 chunk 副作用的 BREAK/PLACE。
-- [ ] 实现 OPERATION_COMMITTED 和 OPERATION_REJECTED。
-- [ ] 实现超时后的 GET_OPERATION_STATUS 和保守状态重同步。
+- [x] 定义 operationId、virtualSessionId、client sequence、baseRevision 和状态哈希前置条件
+      （协议定稿 CACHE_PROTOCOL §3；baseRevision 快速拒绝、preconditions 哈希为冲突键）。
+- [x] slave 以可丢弃 overlay 存储预测（内存 Map，256M 最小增量），不修改 committed snapshot。
+- [x] 源 Fabric 模组在主线程实现幂等操作队列和原子前置条件检查（OperationQueue + OperationAdjudicator）。
+- [x] 只开放无容器、无实体、无流体、无红石、无跨 chunk 副作用的 BREAK/PLACE。
+- [x] 实现 OPERATION_COMMITTED 和 OPERATION_REJECTED（含 canonical delta + resync 范围）。
+- [x] 实现超时后的 GET_OPERATION_STATUS 和保守状态重同步（终态历史 + overlay 清除落回 committed
+      snapshot；UNKNOWN → 丢弃全部预测 fail closed）。
 
 验收：
 
-- [ ] 两人竞争同一方块时，源服只提交一个 operationId。
-- [ ] 被拒绝玩家最终方块、方块实体、光照、库存和 interaction sequence 与源服一致。
-- [ ] 重复、乱序和超时消息不会造成二次写入或幽灵 overlay。
+- [x] 两人竞争同一方块时，源服只提交一个 operationId（OperationQueue 幂等 + OperationRoutingTest）。
+- [x] 被拒绝玩家最终方块、方块实体、光照、库存和 interaction sequence 与源服一致（REJECTED 清除
+      overlay 落回 committed snapshot——源服拒绝即世界未变）。
+- [x] 重复、乱序和超时消息不会造成二次写入或幽灵 overlay（OperationQueueTest/OperationOverlayTest）。
 
-## 阶段 6：扩大操作类型
+## 阶段 6：扩大操作类型（延后，保持禁用）
 
 - [ ] 为每种新增操作写出受影响状态集合、前置条件和 state resync plan。
 - [ ] 按顺序评估 USE_BLOCK、库存/容器、桶、实体互动、红石/活塞、爆炸和模组自定义互动。
 - [ ] 对跨 chunk、异步源服 tick 和多玩家争用建立集成测试。
 
-验收：
+验收（现状满足）：
 
-- [ ] 每种操作的源服 canonical result 均可按 operationId 审计。
-- [ ] 任何无法完整回滚的操作保持禁用。
+- [x] 任何无法完整回滚的操作保持禁用（slave 对不支持类型直接拒绝，不发提交；阶段 8 真实玩家
+      会话接线后按序评估）。
+- [ ] 每种操作的源服 canonical result 均可按 operationId 审计（协议已支持；待类型扩大）。
 
-## 阶段 7：故障、回归与性能
+## 阶段 7：故障、回归与性能（里程碑 7 部分完成）
 
-- [ ] 构建 26.3 golden snapshot、协议状态机和 Mixin 启动自检。
-- [ ] 模拟源服回档、源服/控制服务重启、网络分区、消息重放、缓存损坏和 slave 故障。
-- [ ] 压测多玩家移动、热点区块与高冲突操作；256M 堆压力测试。
+- [x] 构建 26.3 golden snapshot、协议状态机和 Mixin 启动自检（协议 golden + MixinTargetVerifier）。
+- [x] 消息重放/乱序（对象库单调守卫 + OperationQueue 幂等）、源服/控制服务重启（EventLog 容错 +
+      源服 outbox 重发）、slave 故障（断连 fail closed 服务闸门）、操作超时（GET_OPERATION_STATUS）
+      测试覆盖。
+- [x] 快照到达刷新已装载区块（卸载重载 + 就地应用兜底）——修复里程碑 6 记录的故障场景限制。
+- [ ] 模拟源服回档、网络分区、缓存损坏；压测多玩家移动、热点区块与高冲突操作；256M 堆压力测试
+      （延后：需真实玩家负载，阶段 8）。
 - [ ] 正确性通过后再优化热区索引、磁盘分层、压缩、批处理和预热。
 
 验收：
 
-- [ ] 所有故障结果只有“权威最新状态”“完整权威回滚”或“停止使用不确定基线”。
-- [ ] 性能优化关闭后仍保留全部一致性保证；256M 约束不因优化开启而失效。
+- [x] 所有故障结果只有“权威最新状态”“完整权威回滚”或“停止使用不确定基线”（fail closed 语义
+      贯穿：未命中/epoch/fingerprint/前置条件不匹配均拒绝或落回快照）。
+- [ ] 性能优化关闭后仍保留全部一致性保证；256M 约束不因优化开启而失效（压测延后）。
 
 ## 阻塞条件
 

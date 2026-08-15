@@ -133,9 +133,40 @@
       断开（服务闸门关闭）」（fail closed）；重复会话拒绝由 AuthGatewayTest 既有覆盖。
       （真实客户端登录/旁观注入随阶段 7 端到端装配；本里程碑 RCON 为无头玩家视角代理。）
 
-## 里程碑 7：操作与故障（原阶段5-7，顺序不变）
+## 里程碑 7：操作与故障（原阶段5-7，顺序不变）（已完成）
 
-- 单格乐观操作 → 扩大操作类型 → 故障/回归/性能（256M 堆压测）。
+- [x] 草稿 `draft/optimistic-operations/` 三步流程（官方：ServerPlayerGameMode.destroyBlock
+      前置条件/ServerLevel.setBlock/ChunkMap.scheduleUnload 卸载路径/ServerChunkCache.getChunkNow
+      主线程检查/ServerProperties.pause-when-empty-seconds 空服暂停；差异：v1 操作者 = 模拟玩家、
+      master 纯转发不裁决、slave overlay = 内存可丢弃 Map、刷新 = 卸载重载 + 就地应用快照兜底）。
+- [x] 阶段 5 单格乐观操作完整闭环：
+  - 协议 5 消息（SUBMIT_OPERATION/COMMITTED/REJECTED/GET_OPERATION_STATUS/STATUS_RES，0x14-0x18）
+    + codec + golden（同一提交）；
+  - slave `OperationOverlay`（预测登记/查询/清除、单 pending 约束、discardAll fail closed）+
+    `SlaveControlClient.submitOperation/getOperationStatus` + `/icbmslave operate` 调试命令；
+  - 源服 `OperationQueue`（主线程 END_SERVER_TICK 幂等去重、有界终态历史、状态查询）+
+    `OperationAdjudicator`（BREAK/PLACE 原子前置条件 + level.setBlock 权威执行 + canonical delta）；
+  - master `ControlService` 操作路由（operationId → 发起 slave 有界映射；源服未连接 → fail closed
+    拒绝 + resync 范围）；
+  - 刷新机制：快照到达 → 已装载区块卸载重载（官方 scheduleUnload 路径）/ 超时就地应用快照
+    （ProtoChunk 逐方块 setBlockState，flags=0）——不展示旧区块。
+- [x] 验收：
+  - OperationQueueTest（重复 opId 幂等不二次执行、终态历史可查询且稳定、竞争同方块只提交一个、
+    PENDING/UNKNOWN、历史有界）；
+  - OperationOverlayTest（预测/COMMITTED 清除无幽灵/REJECTED 清除+resync 范围/discardAll/
+    单 pending/重复 opId 不双记）；
+  - OperationRoutingTest（slave→master→TestBackendServer 提交/COMMITTED/REJECTED/STATUS 查询回发/
+    源服掉线 fail closed + resync 范围）；
+  - e2e：slave RCON `icbmslave operate 0 64 0 break` → 源服裁决 air → 快照管道 → slave 刷新 →
+    `execute if block 0 64 0 air` Test passed（玩家经 slave 看到操作效果 = 源服权威结果）；fail closed 复验。
+- [x] 修复（e2e 暴露）：master↔slave 心跳缺失（slave 未启用心跳 → master 10s 误断；SlaveConfig 加
+  heartbeatIntervalMillis=8000 < master 读超时 10s）；快照刷新需 Server thread（getChunkNow 主线程
+  检查）；操作裁决先于快照序列化（ticker/operationQueue 顺序）；空服暂停（pause-when-empty-seconds=0
+  缓存服务器必须持续 tick）；卸载卡住（saveSync 依赖）→ 就地应用快照兜底。
+- [ ] 阶段 6 扩大操作类型：USE_BLOCK/库存/桶/实体互动/红石/活塞/爆炸/模组互动全部保持拒绝
+      （slave 对不支持类型直接拒绝，不发提交）；各类型前置条件/受影响状态/回滚计划延后（真实玩家
+      会话接线，阶段 8）。
+- [ ] 阶段 7 剩余：256M 堆压测、真实客户端故障模拟（网络分区/缓存损坏/回档）延后（阶段 8 端到端）。
 
 ## 依赖关系
 

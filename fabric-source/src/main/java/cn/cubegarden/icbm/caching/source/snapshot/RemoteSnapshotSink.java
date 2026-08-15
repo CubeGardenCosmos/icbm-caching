@@ -129,6 +129,16 @@ public final class RemoteSnapshotSink implements SnapshotSink {
     }
 
     @Override
+    public boolean sendOperationResult(cn.cubegarden.icbm.caching.protocol.MessageType type, byte[] body) {
+        BackendControlSession s = this.session;
+        if (s == null || !s.isActive()) {
+            return false;
+        }
+        s.send(type, 0, 0, body);
+        return true;
+    }
+
+    @Override
     public void close() {
         this.closed = true;
         this.server.close();
@@ -268,6 +278,27 @@ public final class RemoteSnapshotSink implements SnapshotSink {
                 LOGGER.error("[icbm-source] backend 错误: {}",
                         cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.<Messages.ErrorMessage>decode(
                                 MessageType.ERROR, body).reason());
+            } else if (type == MessageType.SUBMIT_OPERATION) {
+                cn.cubegarden.icbm.caching.source.SourceRuntime runtime =
+                        cn.cubegarden.icbm.caching.source.SourceRuntime.current();
+                if (runtime != null) {
+                    runtime.operationQueue().enqueue(
+                            cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.decode(
+                                    MessageType.SUBMIT_OPERATION, body));
+                } else {
+                    LOGGER.error("[icbm-source] 操作丢弃（运行时未装配，fail closed）");
+                }
+            } else if (type == MessageType.GET_OPERATION_STATUS) {
+                cn.cubegarden.icbm.caching.source.SourceRuntime runtime =
+                        cn.cubegarden.icbm.caching.source.SourceRuntime.current();
+                if (runtime != null) {
+                    Messages.OperationStatusRes res = runtime.operationQueue().query(
+                            cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.decode(
+                                    MessageType.GET_OPERATION_STATUS, body));
+                    RemoteSnapshotSink.this.sendOperationResult(MessageType.OPERATION_STATUS_RES,
+                            cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.encode(
+                                    MessageType.OPERATION_STATUS_RES, res));
+                }
             }
         }
 

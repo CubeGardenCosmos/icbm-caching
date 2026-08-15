@@ -7,6 +7,7 @@ import cn.cubegarden.icbm.caching.control.replication.EventLog;
 import cn.cubegarden.icbm.caching.control.replication.Replicator;
 import cn.cubegarden.icbm.caching.protocol.ChunkRef;
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
+import cn.cubegarden.icbm.caching.protocol.MessageType;
 import cn.cubegarden.icbm.caching.protocol.Messages;
 import cn.cubegarden.icbm.caching.protocol.PutResult;
 import cn.cubegarden.icbm.caching.protocol.ResolveStatus;
@@ -34,6 +35,15 @@ public final class ControlService implements AutoCloseable {
     private final int runtimeProtocol;
     private volatile cn.cubegarden.icbm.caching.control.auth.SessionRegistry sessionRegistry;
     private volatile cn.cubegarden.icbm.caching.control.auth.TicketVault ticketVault;
+    private volatile cn.cubegarden.icbm.caching.control.net.SourceConnector sourceConnector;
+    /** 乐观操作路由：operationId(hex) → 发起 slave 会话（源服终态回发按此路由；有界近似 LRU）。 */
+    private final java.util.Map<String, ControlSession> operationRoutes =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, ControlSession> eldest) {
+                    return size() > 4096;
+                }
+            });
     private volatile boolean shuttingDown;
 
     public ControlService(SnapshotObjectStore store, EventLog eventLog,
@@ -140,6 +150,111 @@ public final class ControlService implements AutoCloseable {
     /** 装配时注入票据库（SESSION_CLOSED 吊销票据；无则只注销记账）。 */
     public void setTicketVault(cn.cubegarden.icbm.caching.control.auth.TicketVault ticketVault) {
         this.ticketVault = ticketVault;
+    }
+
+    /** 装配时注入源服连接（乐观操作 slave→source 转发；null = 无源服时操作拒绝）。 */
+    public void setSourceConnector(cn.cubegarden.icbm.caching.control.net.SourceConnector sourceConnector) {
+        this.sourceConnector = sourceConnector;
+    }
+
+    // ---- 乐观操作（里程碑 7 阶段 5；裁决在源服主线程，master 纯转发） ----
+
+    /** SUBMIT_OPERATION：slave 提交 → 转发源服裁决（源服唯一权威）；记录路由供终态回发。 */
+    public void onSubmitOperation(ControlSession session, Messages.SubmitOperation msg) {
+        session.requireSlaveRole();
+        this.operationRoutes.put(hex(msg.operationId()), session);
+        cn.cubegarden.icbm.caching.control.net.SourceConnector source = this.sourceConnector;
+        if (source == null || !source.connected()) {
+            LOGGER.warn("[control] 操作拒绝（源服未连接，fail closed）: op={} type={}",
+                    hex(msg.operationId()), msg.operationType());
+            this.routeRejected(session, msg.operationId(), "source-unavailable",
+                    msg.dimension(), posToChunk(msg.posX(), msg.posZ()));
+            return;
+        }
+        source.send(MessageType.SUBMIT_OPERATION, 0, encodeBody(MessageType.SUBMIT_OPERATION, msg));
+    }
+
+    /** GET_OPERATION_STATUS：slave 超时查询 → 转发源服终态历史。 */
+    public void onGetOperationStatus(ControlSession session, Messages.GetOperationStatus msg) {
+        session.requireSlaveRole();
+        cn.cubegarden.icbm.caching.control.net.SourceConnector source = this.sourceConnector;
+        if (source == null || !source.connected()) {
+            LOGGER.warn("[control] 状态查询拒绝（源服未连接）: op={}", hex(msg.operationId()));
+            session.send(MessageType.OPERATION_STATUS_RES, 0,
+                    encodeBody(MessageType.OPERATION_STATUS_RES,
+                            new Messages.OperationStatusRes(msg.operationId(),
+                                    Messages.OperationStatusRes.OperationStatus.UNKNOWN,
+                                    "", 0, "source-unavailable",
+                                    cn.cubegarden.icbm.caching.protocol.DimensionRef.of("minecraft", "overworld"),
+                                    new int[0], new int[0])));
+            return;
+        }
+        source.send(MessageType.GET_OPERATION_STATUS, 0, encodeBody(MessageType.GET_OPERATION_STATUS, msg));
+    }
+
+    /** OPERATION_COMMITTED：源服终态 → 路由回发起 slave。 */
+    public void onOperationCommitted(ControlSession session, Messages.OperationCommitted msg) {
+        session.requireRole(Role.SOURCE);
+        this.routeToOrigin(msg.operationId(), MessageType.OPERATION_COMMITTED, msg);
+    }
+
+    /** OPERATION_REJECTED：源服拒绝 → 路由回发起 slave（携带 resync 范围）。 */
+    public void onOperationRejected(ControlSession session, Messages.OperationRejected msg) {
+        session.requireRole(Role.SOURCE);
+        this.routeToOrigin(msg.operationId(), MessageType.OPERATION_REJECTED, msg);
+    }
+
+    /** OPERATION_STATUS_RES：源服查询结果 → 路由回发起 slave。 */
+    public void onOperationStatusRes(ControlSession session, Messages.OperationStatusRes msg) {
+        session.requireRole(Role.SOURCE);
+        this.routeToOrigin(msg.operationId(), MessageType.OPERATION_STATUS_RES, msg);
+    }
+
+    private void routeToOrigin(byte[] operationId, MessageType type, Object msg) {
+        ControlSession origin = this.operationRoutes.get(hex(operationId));
+        if (origin == null) {
+            LOGGER.warn("[control] 操作终态无法路由（发起 slave 未知/已断开）: op={} type={}",
+                    hex(operationId), type);
+            return;
+        }
+        if (!origin.isActive()) {
+            LOGGER.warn("[control] 操作终态丢弃（发起 slave 已断开）: op={}", hex(operationId));
+            return;
+        }
+        origin.send(type, 0, encodeBody(type, msg));
+    }
+
+    private void routeRejected(ControlSession origin, byte[] operationId, String reason,
+                               DimensionRef dimension, int[][] chunks) {
+        int[] xs = new int[chunks.length];
+        int[] zs = new int[chunks.length];
+        for (int i = 0; i < chunks.length; i++) {
+            xs[i] = chunks[i][0];
+            zs[i] = chunks[i][1];
+        }
+        origin.send(MessageType.OPERATION_REJECTED, 0,
+                encodeBody(MessageType.OPERATION_REJECTED,
+                        new Messages.OperationRejected(operationId, reason, dimension, xs, zs,
+                                System.currentTimeMillis())));
+    }
+
+    private static int[][] posToChunk(int posX, int posZ) {
+        return new int[][] {{Math.floorDiv(posX, 16), Math.floorDiv(posZ, 16)}};
+    }
+
+    private static String hex(byte[] bytes) {
+        return java.util.HexFormat.of().formatHex(bytes);
+    }
+
+    private static byte[] encodeBody(MessageType type, Object msg) {
+        try {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            cn.cubegarden.icbm.caching.protocol.MessageBodyCodec.encode(
+                    type, new java.io.DataOutputStream(bytes), msg);
+            return bytes.toByteArray();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("encode failed: " + type, e);
+        }
     }
 
     public void onAdminInvalidate(ControlSession session, Messages.AdminInvalidate msg) {

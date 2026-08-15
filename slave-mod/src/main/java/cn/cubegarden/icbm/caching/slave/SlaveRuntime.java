@@ -22,23 +22,29 @@ public final class SlaveRuntime {
     private final SpawnRegistry spawnRegistry;
     private final LoginVerifyGate loginVerifyGate;
     private final PlayerBounds playerBounds;
+    private final cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay;
     private final String brand;
 
     private SlaveRuntime(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
                          SpawnRegistry spawnRegistry, LoginVerifyGate loginVerifyGate,
-                         PlayerBounds playerBounds, String brand) {
+                         PlayerBounds playerBounds,
+                         cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay,
+                         String brand) {
         this.client = client;
         this.chunkLoader = chunkLoader;
         this.spawnRegistry = spawnRegistry;
         this.loginVerifyGate = loginVerifyGate;
         this.playerBounds = playerBounds;
+        this.overlay = overlay;
         this.brand = brand;
     }
 
     public static SlaveRuntime create(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
                                       SpawnRegistry spawnRegistry, LoginVerifyGate loginVerifyGate,
-                                      PlayerBounds playerBounds, String brand) {
-        return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds, brand);
+                                      PlayerBounds playerBounds,
+                                      cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay,
+                                      String brand) {
+        return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds, overlay, brand);
     }
 
     public static void install(SlaveRuntime runtime) {
@@ -71,6 +77,11 @@ public final class SlaveRuntime {
 
     public PlayerBounds playerBounds() {
         return this.playerBounds;
+    }
+
+    /** 乐观操作 overlay（可丢弃预测；玩家网络层经它查询/登记预测）。 */
+    public cn.cubegarden.icbm.caching.slave.operation.OperationOverlay overlay() {
+        return this.overlay;
     }
 
     /** 服务器品牌（F3 Brand，MinecraftServer.getServerModName 覆盖值）。 */

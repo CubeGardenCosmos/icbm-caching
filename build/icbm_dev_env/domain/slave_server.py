@@ -77,6 +77,9 @@ def deploy() -> None:
         "enable-rcon=true\n"
         f"rcon.port=25580\n"
         f"rcon.password={secrets.token_hex(8)}\n"
+        # 缓存服务器必须持续 tick（快照应用/区块刷新依赖 Server thread；26.3 空服默认
+        # 60s 暂停 → tick 停止 → 卸载队列不处理 → 区块刷新卡住，里程碑 7 e2e 暴露）
+        "pause-when-empty-seconds=0\n"
     )
     print(f"slave 服务器就绪: {SLAVE_SERVER}（端口 25598，RCON 25580，offline-mode 测试用）")
 
@@ -101,6 +104,7 @@ def write_slave_control_config(master_props: dict[str, str]) -> None:
         "control.viewDistance=8\n"
         "control.readTimeoutMillis=30000\n"
         "control.reconnectBackoffMillis=3000\n"
+        "control.heartbeatIntervalMillis=8000\n"
         "control.selfcheck=true\n"
     )
     (world / "icbm-control.properties").write_text(props)

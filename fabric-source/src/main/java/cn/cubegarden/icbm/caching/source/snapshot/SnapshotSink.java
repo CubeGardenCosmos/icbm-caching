@@ -53,6 +53,12 @@ public interface SnapshotSink extends AutoCloseable {
     void announceEpoch(DimensionRef dimension, long epoch, String reason, String registryFingerprint,
                        Messages.SpawnPoint spawn);
 
+    /** 乐观操作结果回发（OPERATION_COMMITTED/REJECTED/STATUS_RES；里程碑 7 阶段 5）。
+     *  本地 sink（开发模式）为 no-op——操作队列仍记录终态（测试可直接查询）。 */
+    default boolean sendOperationResult(cn.cubegarden.icbm.caching.protocol.MessageType type, byte[] body) {
+        return false;
+    }
+
     @Override
     void close();
 }

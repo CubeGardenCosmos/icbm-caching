@@ -173,11 +173,46 @@ committed snapshot 基线。
 
 ## 3. 乐观操作消息
 
-（阶段 5 实现；消息定义不变）
+（里程碑 7 实现；字段定稿如下）
 
-### SUBMIT_OPERATION / OPERATION_COMMITTED / OPERATION_REJECTED / GET_OPERATION_STATUS
+### SUBMIT_OPERATION / OPERATION_COMMITTED / OPERATION_REJECTED / GET_OPERATION_STATUS / OPERATION_STATUS_RES
 
-见原草案字段。虚拟后端发给源 Fabric 模组；源服以 operationId 去重并只在其主线程判定总顺序。
+乐观操作（ARCHITECTURE §5）：slave 提交 intent → master 纯转发（按发起 slave 会话路由，不裁决）→
+源服主线程幂等裁决（operationId 去重；原子前置条件；重算结果，不信任 slave 的“方块应该变成什么”）→
+终态回发。操作超时不等于失败：slave 以 GET_OPERATION_STATUS 查询终态（有界终态历史，源服保留
+最近 1024 个）。
+
+    SUBMIT_OPERATION(0x14)
+        operationId(16) / playerId(16) / virtualSessionId / clientInteractionSequence(8)
+        operationType(1): BREAK=0 | PLACE=1（其余类型 slave 直接拒绝，不发提交）
+        dimensionId / posX / posY / posZ
+        baseRevision(8)      —— slave 看到的目标 chunk committed revision（快速拒绝，非唯一冲突键）
+        preconditions        —— 目标方块状态哈希（sha256(BlockState.toString)）；源服与权威状态比对
+        placeState           —— PLACE 的目标状态 id（如 minecraft:diamond_block；BREAK 为空）
+        sentAt(8)
+
+    OPERATION_COMMITTED(0x15)
+        operationId / canonicalState（执行后 getBlockState 权威状态 id）/ chunkRevision / epoch / committedAt
+
+    OPERATION_REJECTED(0x16)
+        operationId / reason / dimensionId / resyncChunkX[] / resyncChunkZ[]（完整纠正范围）/ rejectedAt
+
+    GET_OPERATION_STATUS(0x17)
+        operationId
+
+    OPERATION_STATUS_RES(0x18)
+        operationId / status(1): UNKNOWN=0 | PENDING=1 | COMMITTED=2 | REJECTED=3
+        canonicalState / chunkRevision / rejectReason / dimensionId / resyncChunkX[] / resyncChunkZ[]
+
+裁决语义（26.3 ServerPlayerGameMode.destroyBlock 对照）：前置条件 = 目标非 air（BREAK）/ 可替换
+（PLACE）+ preconditions 哈希 == 权威状态哈希 + 非 GameMasterBlock；执行走 level.setBlock/removeBlock
+（Level.java:216 权威世界修改底层）；成功 → 脏标记 + revision 递增（快照管道随后发布新状态）。
+v1 操作者 = 模拟玩家（无真实玩家会话）；真实玩家接线（阶段 8）时替换模拟上下文，裁决核心不变。
+
+slave 侧：可丢弃 overlay（内存 Map，不落盘、不写 committed snapshot）登记预测；COMMITTED → 清除
+该 pos 预测（真实快照随后覆盖）；REJECTED → 清除预测并落回 committed snapshot（源服拒绝即世界未变，
+显示旧状态即与源一致）；每玩家每 chunk 单 pending（相交操作排队）。新快照到达时若区块已装载，
+slave 触发刷新（卸载重载 / 就地应用快照）——不展示旧区块（里程碑 7 修复里程碑 6 限制）。
 
 ## 4. 管理与复制（阶段2 新增）
 

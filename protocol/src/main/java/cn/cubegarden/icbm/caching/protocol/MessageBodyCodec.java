@@ -407,6 +407,145 @@ public final class MessageBodyCodec {
                 return new Messages.SessionClosed(readUuid(in), readString(in), readString(in));
             }
         });
+        register(MessageType.SUBMIT_OPERATION, new Codec<Messages.SubmitOperation>() {
+            @Override
+            public void encode(DataOutput out, Messages.SubmitOperation value) throws IOException {
+                writeUuid(out, value.operationId());
+                writeUuid(out, value.playerId());
+                writeString(out, value.virtualSessionId());
+                out.writeLong(value.clientInteractionSequence());
+                out.writeByte(value.operationType().id());
+                writeDimension(out, value.dimension());
+                out.writeInt(value.posX());
+                out.writeInt(value.posY());
+                out.writeInt(value.posZ());
+                out.writeLong(value.baseRevision());
+                writeString(out, value.preconditions());
+                writeString(out, value.placeState());
+                out.writeLong(value.sentAt());
+            }
+
+            @Override
+            public Messages.SubmitOperation decode(DataInput in) throws IOException {
+                byte[] operationId = readUuid(in);
+                byte[] playerId = readUuid(in);
+                String virtualSessionId = readString(in);
+                long clientInteractionSequence = in.readLong();
+                Messages.OperationType operationType = Messages.OperationType.fromId(in.readUnsignedByte());
+                if (operationType == null) {
+                    throw new IOException("unknown operationType");
+                }
+                DimensionRef dimension = readDimension(in);
+                int posX = in.readInt();
+                int posY = in.readInt();
+                int posZ = in.readInt();
+                long baseRevision = in.readLong();
+                String preconditions = readString(in);
+                String placeState = readString(in);
+                long sentAt = in.readLong();
+                return new Messages.SubmitOperation(
+                        operationId, playerId, virtualSessionId, clientInteractionSequence,
+                        operationType, dimension, posX, posY, posZ,
+                        baseRevision, preconditions, placeState, sentAt);
+            }
+        });
+        register(MessageType.OPERATION_COMMITTED, new Codec<Messages.OperationCommitted>() {
+            @Override
+            public void encode(DataOutput out, Messages.OperationCommitted value) throws IOException {
+                writeUuid(out, value.operationId());
+                writeString(out, value.canonicalState());
+                out.writeLong(value.chunkRevision());
+                out.writeLong(value.epoch());
+                out.writeLong(value.committedAt());
+            }
+
+            @Override
+            public Messages.OperationCommitted decode(DataInput in) throws IOException {
+                return new Messages.OperationCommitted(
+                        readUuid(in), readString(in), in.readLong(), in.readLong(), in.readLong());
+            }
+        });
+        register(MessageType.OPERATION_REJECTED, new Codec<Messages.OperationRejected>() {
+            @Override
+            public void encode(DataOutput out, Messages.OperationRejected value) throws IOException {
+                writeUuid(out, value.operationId());
+                writeString(out, value.reason());
+                writeDimension(out, value.dimension());
+                out.writeShort(value.resyncChunkX().length);
+                for (int i = 0; i < value.resyncChunkX().length; i++) {
+                    out.writeInt(value.resyncChunkX()[i]);
+                    out.writeInt(value.resyncChunkZ()[i]);
+                }
+                out.writeLong(value.rejectedAt());
+            }
+
+            @Override
+            public Messages.OperationRejected decode(DataInput in) throws IOException {
+                byte[] operationId = readUuid(in);
+                String reason = readString(in);
+                DimensionRef dimension = readDimension(in);
+                int count = in.readUnsignedShort();
+                int[] chunkX = new int[count];
+                int[] chunkZ = new int[count];
+                for (int i = 0; i < count; i++) {
+                    chunkX[i] = in.readInt();
+                    chunkZ[i] = in.readInt();
+                }
+                long rejectedAt = in.readLong();
+                return new Messages.OperationRejected(operationId, reason, dimension, chunkX, chunkZ, rejectedAt);
+            }
+        });
+        register(MessageType.GET_OPERATION_STATUS, new Codec<Messages.GetOperationStatus>() {
+            @Override
+            public void encode(DataOutput out, Messages.GetOperationStatus value) throws IOException {
+                writeUuid(out, value.operationId());
+            }
+
+            @Override
+            public Messages.GetOperationStatus decode(DataInput in) throws IOException {
+                return new Messages.GetOperationStatus(readUuid(in));
+            }
+        });
+        register(MessageType.OPERATION_STATUS_RES, new Codec<Messages.OperationStatusRes>() {
+            @Override
+            public void encode(DataOutput out, Messages.OperationStatusRes value) throws IOException {
+                writeUuid(out, value.operationId());
+                out.writeByte(value.status().id());
+                writeString(out, value.canonicalState());
+                out.writeLong(value.chunkRevision());
+                writeString(out, value.rejectReason());
+                writeDimension(out, value.dimension());
+                out.writeShort(value.resyncChunkX().length);
+                for (int i = 0; i < value.resyncChunkX().length; i++) {
+                    out.writeInt(value.resyncChunkX()[i]);
+                    out.writeInt(value.resyncChunkZ()[i]);
+                }
+            }
+
+            @Override
+            public Messages.OperationStatusRes decode(DataInput in) throws IOException {
+                byte[] operationId = readUuid(in);
+                Messages.OperationStatusRes.OperationStatus status =
+                        Messages.OperationStatusRes.OperationStatus.fromId(in.readUnsignedByte());
+                if (status == null) {
+                    throw new IOException("unknown operation status");
+                }
+                String canonicalState = readString(in);
+                long chunkRevision = in.readLong();
+                String rejectReason = readString(in);
+                DimensionRef dimension = readDimension(in);
+                int count = in.readUnsignedShort();
+                int[] chunkX = new int[count];
+                int[] chunkZ = new int[count];
+                for (int i = 0; i < count; i++) {
+                    chunkX[i] = in.readInt();
+                    chunkZ[i] = in.readInt();
+                }
+                return new Messages.OperationStatusRes(
+                        operationId, status, canonicalState, chunkRevision, rejectReason,
+                        dimension, chunkX, chunkZ);
+            }
+        });
     }
 
     private static Codec<Messages.PutSnapshot> snapshotCodec() {

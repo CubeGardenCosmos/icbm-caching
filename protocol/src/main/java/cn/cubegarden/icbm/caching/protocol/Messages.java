@@ -184,4 +184,111 @@ public final class Messages {
     /** SESSION_CLOSED：slave 上报会话关闭，master 注销记账（防会话表泄漏）。 */
     public record SessionClosed(byte[] playerUuid, String sessionId, String reason) {
     }
+
+    /** 乐观操作类型（阶段 5 白名单：仅 BREAK/PLACE；其余类型 slave 直接拒绝，不发提交）。 */
+    public enum OperationType {
+        BREAK(0),
+        PLACE(1);
+
+        private final int id;
+
+        OperationType(int id) {
+            this.id = id;
+        }
+
+        public int id() {
+            return this.id;
+        }
+
+        /** 未知类型返回 null（调用方必须拒绝，不猜测）。 */
+        public static OperationType fromId(int id) {
+            for (OperationType type : values()) {
+                if (type.id == id) {
+                    return type;
+                }
+            }
+            return null;
+        }
+    }
+
+    /** SUBMIT_OPERATION：slave 提交单格乐观操作（源服主线程幂等裁决；预测永不信任）。 */
+    public record SubmitOperation(
+            byte[] operationId,          // UUID（16 字节）；源服以它去重/幂等
+            byte[] playerId,             // UUID（16 字节）；模拟玩家或真实玩家标识
+            String virtualSessionId,     // 会话标识（master 路由回发起 slave）
+            long clientInteractionSequence,
+            OperationType operationType, // BREAK | PLACE
+            DimensionRef dimension,
+            int posX,
+            int posY,
+            int posZ,
+            long baseRevision,           // slave 看到的目标 chunk committed revision（快速拒绝，非唯一冲突键）
+            String preconditions,        // 目标方块状态哈希（sha256(state)）；源服与权威状态比对
+            String placeState,           // PLACE 的目标方块状态 id（如 "minecraft:diamond_block"；BREAK 为空）
+            long sentAt
+    ) {
+    }
+
+    /** OPERATION_COMMITTED：源服权威执行成功（canonical delta = 执行后权威状态 + revision）。 */
+    public record OperationCommitted(
+            byte[] operationId,
+            String canonicalState,       // 执行后 getBlockState 的权威状态 id
+            long chunkRevision,          // 该 chunk 新 revision（脏标记递增后）
+            long epoch,
+            long committedAt
+    ) {
+    }
+
+    /** OPERATION_REJECTED：源服裁决失败（前置条件不满足/类型禁用/执行失败）。 */
+    public record OperationRejected(
+            byte[] operationId,
+            String reason,
+            DimensionRef dimension,
+            int[] resyncChunkX,          // 完整纠正范围（slave RESYNC 该区块，不做单方块包）
+            int[] resyncChunkZ,
+            long rejectedAt
+    ) {
+    }
+
+    /** GET_OPERATION_STATUS：超时后查询操作终态（操作超时不等于失败）。 */
+    public record GetOperationStatus(byte[] operationId) {
+    }
+
+    /** OPERATION_STATUS_RES：终态查询结果。 */
+    public record OperationStatusRes(
+            byte[] operationId,
+            OperationStatus status,      // UNKNOWN | PENDING | COMMITTED | REJECTED
+            String canonicalState,       // COMMITTED 时有效
+            long chunkRevision,
+            String rejectReason,
+            DimensionRef dimension,
+            int[] resyncChunkX,
+            int[] resyncChunkZ
+    ) {
+        public enum OperationStatus {
+            UNKNOWN(0),
+            PENDING(1),
+            COMMITTED(2),
+            REJECTED(3);
+
+            private final int id;
+
+            OperationStatus(int id) {
+                this.id = id;
+            }
+
+            public int id() {
+                return this.id;
+            }
+
+            public static OperationStatus fromId(int id) {
+                for (OperationStatus status : values()) {
+                    if (status.id == id) {
+                        return status;
+                    }
+                }
+                return null;
+            }
+        }
+    }
 }
