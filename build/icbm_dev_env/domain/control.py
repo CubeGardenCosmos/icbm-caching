@@ -1,95 +1,60 @@
-"""mTLS 证书生成与控制服务启停（阶段2 后台控制平面 / 阶段0 隔离实验环境）。
+"""master 控制服务启停（阶段2：control-service 并入 master 后的独立进程形态）。
 
-证书布局（build/workspace/certs/，Git 忽略）：
-  ca-trust.p12            CA 信任库（所有对端共用）
-  master-control.p12      控制服务（master）私钥证书（CN=master-control）
-  source-server.p12       Fabric 源模组客户端（CN=source-server → SOURCE 角色）
-  slave-a.p12 / slave-b.p12  地区 slave 客户端（CN=slave-a/b → VELOCITY 角色）
-  virtual-backend.p12     虚拟后端客户端（CN=virtual-backend → VIRTUAL_BACKEND 角色）
+配置（build/workspace/control-run/control.properties，Git 忽略）：
+  control.host=0.0.0.0
+  control.encapsulatedPort=11420        单端口封装通道（magic + AUTH 公共密码 + ChaCha20-Poly1305）
+  control.psk=<生成随机 PSK>             运维手册禁止弱公共密码
+  control.roleBindings=<uuid>=SOURCE,<uuid>=SLAVE,...  按 AUTH UUID 绑定角色
 
-角色绑定（control.properties control.roleBindings）：
-  source-server=SOURCE,slave-a=VELOCITY,slave-b=VELOCITY,virtual-backend=VIRTUAL_BACKEND
+不使用 TLS/mTLS 证书；畸形/原版握手由 master 直接 RST。
 """
 
 from __future__ import annotations
 
-import shutil
-import subprocess
+import secrets
 
 from ..infra import paths, shell
 
 
-def gen_certs() -> None:
-    """生成 CA 与全部角色证书（PKCS12，密码 changeit；已存在则跳过）。"""
-    certs = paths.CERTS_DIR
-    if (certs / "ca-trust.p12").exists():
-        print(f"证书已存在: {certs}（删除后重新生成）")
-        return
-    if not shutil.which("openssl") or not shutil.which("keytool"):
-        raise RuntimeError("生成 mTLS 证书需要 openssl 与 keytool")
-    certs.mkdir(parents=True, exist_ok=True)
-    _shell(certs, "openssl req -x509 -newkey rsa:2048 -keyout ca.key -out ca.crt "
-                  "-days 3650 -nodes -subj /CN=icbm-test-ca")
-    for cn in ("master-control", "source-server", "slave-a", "slave-b", "virtual-backend"):
-        _shell(certs, f"openssl req -newkey rsa:2048 -keyout {cn}.key -out {cn}.csr "
-                      f"-nodes -subj /CN={cn}")
-        _shell(certs, f"openssl x509 -req -in {cn}.csr -CA ca.crt -CAkey ca.key "
-                      f"-CAcreateserial -out {cn}.crt -days 3650")
-        _shell(certs, f"openssl pkcs12 -export -inkey {cn}.key -in {cn}.crt "
-                      f"-out {cn}.p12 -passout pass:changeit -name icbm-{cn}")
-    _shell(certs, "keytool -importcert -noprompt -alias ca -file ca.crt "
-                  "-keystore ca-trust.p12 -storetype PKCS12 -storepass changeit")
-    print(f"证书就绪: {certs}")
-
-
-def gen_certs_and_roles() -> None:
-    """生成证书并保证控制服务角色绑定包含全部角色（含 VIRTUAL_BACKEND）。"""
-    gen_certs()
-    write_control_config()
-
-
 def write_control_config() -> None:
-    """生成控制服务运行配置（build/workspace/control-run/control.properties）。"""
+    """生成 master 运行配置（build/workspace/control-run/control.properties）。"""
     run_dir = paths.CONTROL_RUN
     run_dir.mkdir(parents=True, exist_ok=True)
-    certs = paths.CERTS_DIR
+    psk = secrets.token_hex(32)
+    # 固定示例对等方（UUID 为 AUTH 身份；source/slave 的正式 UUID 由部署方决定）
+    source_uuid = "0102030405060708090a0b0c0d0e0f10"
+    slave_uuid = "1112131415161718191a1b1c1d1e1f20"
     props = (
         "control.host=0.0.0.0\n"
-        "control.port=11420\n"
-        "control.keyStore={certs}/master-control.p12\n"
-        "control.keyStorePassword=changeit\n"
-        "control.trustStore={certs}/ca-trust.p12\n"
-        "control.trustStorePassword=changeit\n"
-        "control.requireClientCert=true\n"
+        "control.encapsulatedPort=11420\n"
         "control.storeRoot={run}/objects\n"
         "control.eventLogPath={run}/events.log\n"
         "control.serverId=master-1\n"
-        "control.roleBindings=source-server=SOURCE,slave-a=VELOCITY,slave-b=VELOCITY,virtual-backend=VIRTUAL_BACKEND\n"
+        "control.serverName=lobby-1\n"
+        "control.psk={psk}\n"
+        "control.roleBindings={source_uuid}=SOURCE,{slave_uuid}=SLAVE\n"
         "control.pushWindow=64\n"
         "control.heartbeatIntervalMillis=30000\n"
         "control.lagThresholdMillis=90000\n"
-    ).format(certs=certs, run=run_dir)
+    ).format(run=run_dir, psk=psk, source_uuid=source_uuid, slave_uuid=slave_uuid)
     (run_dir / "control.properties").write_text(props)
-    print(f"控制服务配置: {run_dir / 'control.properties'}")
+    print(f"master 配置: {run_dir / 'control.properties'}")
+    print(f"  PSK={psk}（仅本次生成；部署时按运维手册安全分发）")
+    print(f"  角色绑定: SOURCE={source_uuid} SLAVE={slave_uuid}")
 
 
 def start_control_service() -> int:
-    """前台启动控制服务（gradlew run；Ctrl-C 退出）。"""
-    gen_certs()
+    """前台启动 master 控制服务（velocity-plugin gradlew run；Ctrl-C 退出）。"""
     write_control_config()
     from . import jdk
 
     env = jdk.java_home_env()
     env["ICBM_CONTROL_CONFIG"] = str(paths.CONTROL_RUN / "control.properties")
-    print("启动控制服务（build/workspace/control-run，端口 11420）...")
+    print("启动 master（build/workspace/control-run，封装通道端口 11420）...")
     proc = shell.run(
-        [str(paths.CONTROL_SERVICE / "gradlew"), "run", "--console=plain"],
-        cwd=str(paths.CONTROL_SERVICE),
+        [str(paths.VELOCITY_PLUGIN / "gradlew"), "run", "--console=plain"],
+        cwd=str(paths.VELOCITY_PLUGIN),
         env=env,
         check=False,
     )
     return proc.returncode
-
-
-def _shell(cwd, command: str) -> None:
-    subprocess.run(command, shell=True, cwd=cwd, check=True)

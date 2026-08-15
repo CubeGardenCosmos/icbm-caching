@@ -8,7 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 对等方注册表：鉴权绑定（mTLS 证书 CN 或封装通道 AUTH UUID）→ 角色绑定、HELLO 注册
+ * 对等方注册表：鉴权绑定（封装通道 AUTH UUID）→ 角色绑定、HELLO 注册
  * （sourceServerId → 会话/角色）、源指纹注册（slave 指纹必须与源一致——CACHE_PROTOCOL
  * 「fingerprint 不一致时拒绝快照复用」）。
  */
@@ -16,7 +16,7 @@ public final class PeerRegistry {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PeerRegistry.class);
 
-    private final Map<String, String> roleBindings; // bindingId(cert CN / UUID) -> role 名
+    private final Map<String, String> roleBindings; // auth UUID(hex) -> role 名
     private final ConcurrentMap<String, ControlSession> sessions = new ConcurrentHashMap<>(); // sourceServerId -> session
     private final ConcurrentMap<String, Role> roles = new ConcurrentHashMap<>();           // sourceServerId -> role
     private volatile String sourceModpackFingerprint = "";
@@ -26,7 +26,7 @@ public final class PeerRegistry {
         this.roleBindings = Map.copyOf(roleBindings);
     }
 
-    /** 鉴权绑定标识（证书 CN / UUID）绑定角色；未配置绑定 → null（调用方按策略拒绝）。 */
+    /** 鉴权绑定标识（AUTH UUID）绑定角色；未配置绑定 → null（调用方按策略拒绝）。 */
     public Role roleForBinding(String bindingId) {
         String roleName = this.roleBindings.get(bindingId);
         return roleName == null ? null : Role.valueOf(roleName);

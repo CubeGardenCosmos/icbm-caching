@@ -18,9 +18,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * 控制会话共享逻辑（显式状态机：{@code AWAIT_HELLO → ACTIVE → CLOSED}），
- * 与传输解耦：netty mTLS（{@link PeerSession}）与封装通道（阶段1
- * EncapsulatedControlSession）复用同一套 HELLO 校验、序号递增校验、消息分发与
- * 权限规则（草稿 phase2-control-protocol §3/§4）。
+ * 与传输解耦：封装通道会话（{@link EncapsulatedControlSession}）及其它传输实现
+ * 复用同一套 HELLO 校验、序号递增校验、消息分发与权限规则
+ * （草稿 encapsulated-channel §3/§4）。
  *
  * <p>校验（按序，任一失败 → ERROR + 断连，fail closed）：
  * <ol>

@@ -14,18 +14,16 @@ import cn.cubegarden.icbm.caching.virtual.session.HandshakeSession;
 import cn.cubegarden.icbm.caching.virtual.session.LoginSession;
 import cn.cubegarden.icbm.caching.virtual.session.PlaySession;
 import cn.cubegarden.icbm.caching.virtual.session.StatusSession;
-import cn.cubegarden.icbm.caching.virtual.tls.TlsClientContextFactory;
 import cn.cubegarden.icbm.caching.virtual.world.SnapshotRepository;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
-import javax.net.ssl.SSLContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * 虚拟后端（阶段3）：独立 26.3 旁观者后端服务。
  *
- * <p>接线：游戏监听（netty）+ 控制平面（mTLS SLAVE 角色订阅/推送）+ 本地对象库
+ * <p>接线：游戏监听（netty）+ 控制平面（封装通道 SLAVE 角色订阅/推送）+ 本地对象库
  * （ServeGate 语义 fail closed）+ 转储注册表（manifest 指纹校验）。
  *
  * <p>验收映射：
@@ -66,15 +64,13 @@ public final class VirtualBackendMain implements AutoCloseable {
                 (int) registry.worldLong("minSectionY", -4),
                 (int) registry.worldLong("maxSectionY", 19));
 
-        SSLContext ssl = TlsClientContextFactory.create(
-                Path.of(config.keyStore()), config.keyStorePassword(),
-                Path.of(config.trustStore()), config.trustStorePassword());
         this.replicationClient = new ReplicationClient(
                 config.controlHost(), config.controlPort(), config.serverId(),
                 config.minecraftVersion(), config.runtimeProtocol(),
                 config.fabricLoaderVersion(), config.fabricApiVersion(),
                 config.modpackFingerprint(), config.registryAndDatapackFingerprint(),
-                ssl, 15000, 3000, this.store, this.repository, new DimensionRef[]{dimension}, 16);
+                config.controlPsk(), config.controlUuid(),
+                15000, 3000, this.store, this.repository, new DimensionRef[]{dimension}, 16);
 
         this.gameServer = new GameServer(config, this::newConnection);
     }

@@ -27,19 +27,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("server", help="启动测试 Fabric 服务器（前台，Ctrl-C 退出）")
     sub.add_parser(
         "test",
-        help="运行全部组件测试（protocol/control-service/velocity-plugin/virtual-backend/fabric-source）",
+        help="运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source）",
     )
     sub.add_parser(
         "build",
-        help="构建全部组件（protocol/control-service/velocity-plugin/virtual-backend/fabric-source）",
+        help="构建全部组件（protocol/velocity-plugin/virtual-backend/fabric-source）",
     )
     sub.add_parser(
         "control",
-        help="启动控制服务（master 缓存目录，前台，端口 11420）",
-    )
-    sub.add_parser(
-        "certs",
-        help="生成 mTLS 证书（build/workspace/certs，CA/源/slave/虚拟后端角色）",
+        help="启动 master 控制服务（封装通道，前台，端口 11420）",
     )
     sub.add_parser(
         "capture-registry",

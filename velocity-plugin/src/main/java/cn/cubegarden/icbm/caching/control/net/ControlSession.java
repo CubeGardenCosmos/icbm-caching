@@ -4,15 +4,15 @@ import cn.cubegarden.icbm.caching.protocol.MessageType;
 import cn.cubegarden.icbm.caching.protocol.Role;
 
 /**
- * 控制会话抽象（master 侧领域逻辑依赖的最小面；netty mTLS 会话与封装通道会话
- * 共用同一套 ControlService/Replicator/PeerRegistry 逻辑——阶段1 封装服务复用）。
+ * 控制会话抽象（master 侧领域逻辑依赖的最小面；封装通道会话与其它传输实现
+ * 共用同一套 ControlService/Replicator/PeerRegistry 逻辑）。
  */
 public interface ControlSession {
 
     /** sourceServerId（HELLO 包络中的对端标识）。 */
     String sourceServerId();
 
-    /** 鉴权绑定标识：mTLS 会话 = 证书 CN；封装通道会话 = AUTH UUID。 */
+    /** 鉴权绑定标识：封装通道会话 = AUTH UUID（master 注册表据此绑定角色）。 */
     String bindingId();
 
     Role role();

@@ -37,12 +37,19 @@
 - [x] 验收：旧消息不回归（现有组件测试通过）；golden 字节锁定（AUTH/帧/HKDF 向量）；
       畸形帧/非 magic 连接 RST 测试（协议层 + 服务器层 EncapsulatedControlServerTest）。
 
-## 里程碑 2：control-service 并入 master
+## 里程碑 2：control-service 并入 master（已完成）
 
-- [ ] control-service 从独立 netty 监听改为 master 内部模块（封装通道处理连接；对象库/
-      事件日志/订阅逻辑不变）；删除独立 mTLS 监听与证书 CN 角色绑定。
-- [ ] PeerRegistry 改为按 UUID+公共密码鉴权结果注册（role 由注册表决定：SLAVE / SOURCE）。
-- [ ] 验收：既有对象库/重放/订阅测试迁移后全绿；无独立监听端口。
+- [x] control-service 并入 master（velocity-plugin 模块，包 `cn.cubegarden.icbm.caching.control`
+      不变）；对象库/事件日志/订阅逻辑不变；独立进程形态保留 `ControlServiceMain`（Velocity
+      插件入口于阶段5 接线）。
+- [x] 删除独立 mTLS 监听与证书 CN 角色绑定：ControlServer/PeerSession/MessageFramer/
+      TlsContextFactory 移除；ServiceConfig 去掉 TLS 字段；`build/main.py certs` 删除。
+- [x] 封装通道客户端（protocol `EncapsulatedChannelClient`）：AUTH（公共密码证明 + UUID）→
+      HKDF → ChaCha20-Poly1305 → HELLO/序号/重连；两侧复用（virtual-backend 连接层已迁移，
+      fabric-source 随里程碑 3 迁移）。
+- [x] PeerRegistry 按 UUID+公共密码鉴权结果注册（roleBindings: AUTH UUID → SLAVE/SOURCE）。
+- [x] 验收：既有对象库/重放/订阅测试迁移到封装通道后全绿（ControlServiceIntegrationTest）；
+      无独立监听端口（只剩封装通道 11420；畸形/原版握手 RST）。
 
 ## 里程碑 3：backend 模组（fabric-source 演化）
 
@@ -106,3 +113,8 @@
 - 权威会话桥涉及“slave 终止登录 + 明文转发”双重角色，是阶段 5 最大的协议复杂度点；
   里程碑 4 先保证缓存会话闭环，再开权威桥。
 - 256M 约束是全链路硬约束：任何“整块驻留”路径（快照、编码、封装缓冲）都要按需流式。
+- **第三方协议库评估（Protocolize，Exceptionflug/protocolize）：不引入。** MIT 许可且仍在
+  维护，但 `ProtocolVersions.MINECRAFT_LATEST = 1_21_5`（协议 770），不支持 26.3
+  （协议 1073742154）；包 ID/字段/data components/tracked data 布局不同，引入即违反
+  VERSION_FREEZE「26.3 常量必须来自 minecraft-assets」硬约束。借鉴点：其 Velocity pipeline
+  注入（捕获后端连接原始包字节）思路，里程碑 5 权威会话桥用 Velocity 原生 API 实现。

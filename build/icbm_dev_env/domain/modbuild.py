@@ -1,6 +1,6 @@
 """构建/测试各 Java 组件（Gradle wrapper + JDK 25 + JVM 代理参数）。
 
-fabric-source 为 Loom 模组；protocol/control-service/velocity-plugin/virtual-backend 为纯 Java
+fabric-source 为 Loom 模组；protocol/velocity-plugin（master）/virtual-backend 为纯 Java
 （protocol 经复合构建被其余组件消费）。
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..infra import paths, shell
 
-_ALL = ("protocol", "control-service", "velocity-plugin", "virtual-backend", "fabric-source")
+_ALL = ("protocol", "velocity-plugin", "virtual-backend", "fabric-source")
 
 
 def _gradlew(component: str) -> str:

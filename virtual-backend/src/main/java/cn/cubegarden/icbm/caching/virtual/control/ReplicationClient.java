@@ -7,18 +7,17 @@ import cn.cubegarden.icbm.caching.protocol.MessageType;
 import cn.cubegarden.icbm.caching.protocol.Messages;
 import cn.cubegarden.icbm.caching.protocol.PutResult;
 import cn.cubegarden.icbm.caching.protocol.Role;
-import cn.cubegarden.icbm.caching.protocol.client.ControlChannel;
+import cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient;
 import cn.cubegarden.icbm.caching.protocol.store.SnapshotObjectStore;
 import cn.cubegarden.icbm.caching.virtual.world.SnapshotRepository;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
-import javax.net.ssl.SSLContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 虚拟后端控制平面客户端（CACHE_PROTOCOL.md，阶段2 消息复用）：以 SLAVE 角色
+ * 虚拟后端控制平面客户端（CACHE_PROTOCOL.md；封装通道：公共密码 + UUID）：以 SLAVE 角色
  * 连接 master → HELLO（源指纹）→ SUBSCRIBE（ackedSequence）→ 接收 WORLD_EPOCH /
  * INVALIDATE / SNAPSHOT_PUSH 应用到本地对象库 → ACK 推进流控窗口。
  *
@@ -29,7 +28,7 @@ public final class ReplicationClient implements AutoCloseable {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ReplicationClient.class);
 
-    private final ControlChannel channel;
+    private final EncapsulatedChannelClient channel;
     private final SnapshotObjectStore store;
     private final SnapshotRepository repository;
     private final Set<DimensionRef> subscribed;
@@ -49,7 +48,8 @@ public final class ReplicationClient implements AutoCloseable {
             String fabricApiVersion,
             String modpackFingerprint,
             String registryAndDatapackFingerprint,
-            SSLContext sslContext,
+            String psk,
+            String uuidHex,
             long readTimeoutMillis,
             long reconnectBackoffMillis,
             SnapshotObjectStore store,
@@ -61,11 +61,11 @@ public final class ReplicationClient implements AutoCloseable {
         this.repository = repository;
         this.subscribed = Set.copyOf(Arrays.asList(dimensions));
         this.ackBatchSize = Math.max(1, ackBatchSize);
-        this.channel = new ControlChannel(host, port, serverId,
-                new ControlChannel.HelloConfig(Role.SLAVE, serverId, minecraftVersion, runtimeProtocol,
+        this.channel = new EncapsulatedChannelClient(host, port, serverId, uuidHex, psk,
+                new EncapsulatedChannelClient.HelloConfig(Role.SLAVE, serverId, minecraftVersion, runtimeProtocol,
                         fabricLoaderVersion, fabricApiVersion, modpackFingerprint,
                         registryAndDatapackFingerprint, (byte) 0),
-                sslContext, readTimeoutMillis, reconnectBackoffMillis, true, new ChannelListener());
+                readTimeoutMillis, reconnectBackoffMillis, true, new ChannelListener());
     }
 
     public void start() {
@@ -84,7 +84,7 @@ public final class ReplicationClient implements AutoCloseable {
 
     private void subscribe() {
         this.channel.send(MessageType.SUBSCRIBE, this.requestIds.incrementAndGet(), 0,
-                ControlChannel.encode(MessageType.SUBSCRIBE,
+                EncapsulatedChannelClient.encode(MessageType.SUBSCRIBE,
                         new Messages.Subscribe(this.subscribed.toArray(DimensionRef[]::new),
                                 true, this.lastAckedSequence)));
         LOGGER.info("[vb] 订阅: dims={} ackedSeq={}", this.subscribed, this.lastAckedSequence);
@@ -92,7 +92,7 @@ public final class ReplicationClient implements AutoCloseable {
 
     private void ack(long sequence) {
         this.channel.send(MessageType.ACK, this.requestIds.incrementAndGet(), 0,
-                ControlChannel.encode(MessageType.ACK, new Messages.Ack(sequence)));
+                EncapsulatedChannelClient.encode(MessageType.ACK, new Messages.Ack(sequence)));
         this.lastAckedSequence = Math.max(this.lastAckedSequence, sequence);
     }
 
@@ -136,7 +136,7 @@ public final class ReplicationClient implements AutoCloseable {
         }
     }
 
-    private final class ChannelListener implements ControlChannel.Listener {
+    private final class ChannelListener implements EncapsulatedChannelClient.Listener {
         @Override
         public void onConnected(String serverId) {
             ReplicationClient.this.repository.setMasterConnected(true);
@@ -162,14 +162,14 @@ public final class ReplicationClient implements AutoCloseable {
             try {
                 switch (type) {
                     case INVALIDATE -> ReplicationClient.this.handleInvalidate(
-                            ControlChannel.decode(MessageType.INVALIDATE, body), envelope.sequence());
+                            EncapsulatedChannelClient.decode(MessageType.INVALIDATE, body), envelope.sequence());
                     case WORLD_EPOCH -> ReplicationClient.this.handleWorldEpoch(
-                            ControlChannel.decode(MessageType.WORLD_EPOCH, body), envelope.sequence());
+                            EncapsulatedChannelClient.decode(MessageType.WORLD_EPOCH, body), envelope.sequence());
                     case SNAPSHOT_PUSH -> ReplicationClient.this.handleSnapshotPush(
-                            ControlChannel.decode(MessageType.SNAPSHOT_PUSH, body), envelope, envelope.sequence());
+                            EncapsulatedChannelClient.decode(MessageType.SNAPSHOT_PUSH, body), envelope, envelope.sequence());
                     case HEARTBEAT -> ReplicationClient.this.ack(envelope.sequence());
                     case ERROR -> LOGGER.error("[vb] master 错误: {}",
-                            ControlChannel.<Messages.ErrorMessage>decode(MessageType.ERROR, body).reason());
+                            EncapsulatedChannelClient.<Messages.ErrorMessage>decode(MessageType.ERROR, body).reason());
                     default -> LOGGER.warn("[vb] 忽略类型: {}", type);
                 }
             } catch (Exception e) {

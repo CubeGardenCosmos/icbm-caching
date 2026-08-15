@@ -1,8 +1,8 @@
-"""虚拟后端启停（阶段3）：生成运行配置（含 VIRTUAL_BACKEND mTLS 证书）并前台启动。
+"""虚拟后端启停（阶段3 只读变体参考；连接层已迁封装通道，里程碑 4 迁入 slave-mod）。
 
 配置布局（build/workspace/virtual-backend-run/）：
-  virtual-backend.properties  运行配置（控制服务地址/本地对象库/维度/视距/指纹）
-mTLS：CN=virtual-backend → VIRTUAL_BACKEND 角色（control.roleBindings）。
+  virtual-backend.properties  运行配置（master 封装通道地址/PSK/UUID/本地对象库/维度/视距/指纹）
+封装通道：公共密码 + UUID → SLAVE 角色（master control.roleBindings 绑定）。
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ def write_virtual_backend_config() -> None:
     """生成虚拟后端运行配置（build/workspace/virtual-backend-run/）。"""
     run_dir = paths.WORKSPACE / "virtual-backend-run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    certs = paths.CERTS_DIR
     fingerprints = _load_fingerprints()
 
     props = (
@@ -28,10 +27,8 @@ def write_virtual_backend_config() -> None:
         "virtualBackend.keepAliveIntervalMillis=15000\n"
         "control.host=127.0.0.1\n"
         "control.port=11420\n"
-        "control.keyStore={certs}/virtual-backend.p12\n"
-        "control.keyStorePassword=changeit\n"
-        "control.trustStore={certs}/ca-trust.p12\n"
-        "control.trustStorePassword=changeit\n"
+        "control.psk=请填写与 master control.properties 一致的 PSK\n"
+        "control.uuid=22222222222222222222222222222222\n"
         "fingerprint.minecraftVersion={mc}\n"
         "fingerprint.runtimeProtocol={protocol}\n"
         "fingerprint.fabricLoaderVersion=0.19.3\n"
@@ -40,7 +37,6 @@ def write_virtual_backend_config() -> None:
         "fingerprint.registryAndDatapackFingerprint={registry}\n"
     ).format(
         run=run_dir,
-        certs=certs,
         mc=fingerprints.get("minecraftVersion", "26.3-snapshot-8"),
         protocol=fingerprints.get("runtimeProtocol", "1073742154"),
         modpack=fingerprints.get("modpackFingerprint", ""),
@@ -48,6 +44,8 @@ def write_virtual_backend_config() -> None:
     )
     (run_dir / "virtual-backend.properties").write_text(props)
     print(f"虚拟后端配置: {run_dir / 'virtual-backend.properties'}")
+    print("  注意：control.psk 需与 master（control.properties）一致；UUID 需在 master 的")
+    print("        control.roleBindings 中绑定为 SLAVE。")
 
 
 def _load_fingerprints() -> dict:
@@ -62,7 +60,6 @@ def _load_fingerprints() -> dict:
 
 def start_virtual_backend() -> int:
     """前台启动虚拟后端（gradlew run；Ctrl-C 退出）。"""
-    control.gen_certs_and_roles()
     write_virtual_backend_config()
     from . import jdk
 

@@ -68,8 +68,7 @@ class EncapsulatedControlServerTest {
     @BeforeEach
     void setUp() throws Exception {
         ServiceConfig config = new ServiceConfig(
-                "127.0.0.1", 0,
-                null, "", null, "", false,
+                "127.0.0.1",
                 this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
                 "master-1", "lobby-1", PSK, 0,
                 java.util.Map.of(), 16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);

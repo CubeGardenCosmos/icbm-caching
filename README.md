@@ -16,8 +16,10 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
 
 - **源 Fabric 服务器（`fabric-source/`）**：唯一能提交世界写入与裁决冲突的节点；产生
   WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/操作终态消息事件。
-- **master（`control-service/` + `velocity-plugin/`）**：唯一信任根与决策中心；Mojang 正版验证、
-  全局会话记账（防同一玩家加入多个 slave）、单端口封装通道、required/committed revision 快照聚合。
+- **master（`velocity-plugin/`，含已并入的 `cn.cubegarden.icbm.caching.control` 包）**：唯一信任根与
+  决策中心；Mojang 正版验证、全局会话记账（防同一玩家加入多个 slave）、单端口封装通道、
+  required/committed revision 快照聚合。独立进程形态入口 `ControlServiceMain`（Velocity 插件
+  入口于阶段 5 接线）。
 - **slave（`slave-mod/`，规划中；现由 `virtual-backend/` 作为只读变体参考）**：原生 MC 服务器进程
   上的 Fabric 模组，装载 committed snapshot，未命中/落后/epoch 不匹配 fail closed；256M JVM 约束。
 - **`protocol/`**：跨组件共享控制协议（包络/消息编解码/对象库/封装通道层，纯 Java 25）。
@@ -28,10 +30,9 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
 
 - `uv run build/main.py init`：部署 JDK 25、克隆参考仓库（Fabric/Velocity）、部署测试服务器、
   反编译 26.3-snapshot-8 服务端源码（行为分析最高权重参考）。
-- `uv run build/main.py test`：运行全部组件测试（protocol/control-service/velocity-plugin/
-  virtual-backend/fabric-source）。
-- `uv run build/main.py server|control|certs|reinit|cleanup`：测试服务器 / 控制服务 / mTLS 证书 /
-  破坏性重置与清理（见 `build/README.md`）。
+- `uv run build/main.py test`：运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source）。
+- `uv run build/main.py server|control|reinit|cleanup`：测试服务器 / master 控制服务（封装通道
+  11420，生成 PSK 与 UUID 角色绑定）/ 破坏性重置与清理（见 `build/README.md`）。
 
 硬约束：新增功能必须先完成 `build/workspace/draft/<功能名>` 三步草稿（参考仓库 → 官方源码 →
 差异取舍）；协议变更必须「文档 + 两侧实现 + golden 测试」同一提交；版本冻结见 `docs/VERSION_FREEZE.md`。

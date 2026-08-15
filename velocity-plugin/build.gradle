@@ -1,5 +1,6 @@
 plugins {
     id 'java-library'
+    id 'application'
 }
 
 version = project.plugin_version
@@ -12,12 +13,20 @@ repositories {
 dependencies {
     // 共享协议模块（includeBuild('../protocol') 提供）
     api "cn.cubegarden.icbm.caching:protocol:${project.protocol_version}"
-    compileOnly 'org.slf4j:slf4j-api:2.0.16' // Velocity 运行时提供
+    implementation 'org.slf4j:slf4j-api:2.0.16' // Velocity 运行时提供（独立进程形态自备）
+
+    // 独立进程形态（ControlServiceMain）的日志实现；Velocity 插件形态由代理进程提供
+    runtimeOnly 'ch.qos.logback:logback-classic:1.5.12'
 
     testImplementation platform('org.junit:junit-bom:5.11.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.16'
+    testRuntimeOnly 'ch.qos.logback:logback-classic:1.5.12'
+}
+
+application {
+    // master 独立进程形态（阶段2 并入后；Velocity 插件入口于阶段5 接线）
+    mainClass = 'cn.cubegarden.icbm.caching.control.ControlServiceMain'
 }
 
 java {

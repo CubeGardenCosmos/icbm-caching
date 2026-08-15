@@ -29,7 +29,9 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
 - [x] 传输层重写：master 单端口封装通道（magic → 握手[公共密码+UUID] → ChaCha20-Poly1305；
       畸形/原版握手 RST；多路复用：控制帧 + 明文 MC 报文转发）；golden 测试全更新
       （EncapsulatedControlServer 已实现；MC_PASSTHROUGH 转发随阶段5 权威会话桥）。
-- [ ] control-service 并入 master（不再独立监听；对象库/事件日志/订阅逻辑成为 master 内部模块）。
+- [x] control-service 并入 master（velocity-plugin 模块承载 control 包；独立 mTLS 监听与
+      证书 CN 角色绑定已删除，仅剩单端口封装通道；PeerRegistry 按 AUTH UUID 绑定
+      SLAVE/SOURCE；virtual-backend 连接层已迁封装通道客户端）。
 - [ ] backend 模组（fabric-source 演化）：连接层从 mTLS 换成 velocity 授信模式（forwarding secret，
       内网，master 主动连接）；serverName 注册；数据包缓存；事件集合不变（WORLD_EPOCH/INVALIDATE/
       PUT_SNAPSHOT/操作终态）。

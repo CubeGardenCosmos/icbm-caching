@@ -1,26 +1,22 @@
 package cn.cubegarden.icbm.caching.control.config;
 
 import cn.cubegarden.icbm.caching.protocol.Role;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 
 /**
- * 控制服务配置（加载自 properties 文件或默认值；密钥路径缺省时禁用 TLS 仅限测试）。
+ * master 配置（加载自 properties 文件或默认值）。
  *
- * <p>字段：监听地址、mTLS 密钥/信任库、对象库根目录、事件日志路径、角色绑定
- * （证书 CN → {@code cn.cubegarden.icbm.caching.protocol.Role}）、流控窗口与滞后阈值。
+ * <p>字段：封装通道监听地址/端口、公共密码（PSK，运维手册禁止弱密码）、对象库根目录、
+ * 事件日志路径、角色绑定（**AUTH UUID → 角色**；SLAVE / SOURCE）、流控窗口与滞后阈值。
+ *
+ * <p>传输约束（CACHE_PROTOCOL §1）：单端口封装通道（magic + AUTH 公共密码证明 +
+ * ChaCha20-Poly1305），不使用 TLS；畸形/原版握手 RST。
  */
 public record ServiceConfig(
         String host,
-        int port,
-        Path keyStore,
-        String keyStorePassword,
-        Path trustStore,
-        String trustStorePassword,
-        boolean requireClientCert,
         Path storeRoot,
         Path eventLogPath,
         int maxEventLogEntries,
@@ -28,7 +24,7 @@ public record ServiceConfig(
         String serverName,
         String psk,
         int encapsulatedPort,
-        Map<String, String> roleBindings, // bindingId(cert CN / UUID) -> role 名
+        Map<String, String> roleBindings, // auth UUID(hex) -> role 名（SLAVE/SOURCE）
         int maxFrameBytes,
         int pushWindow,
         long heartbeatIntervalMillis,
@@ -38,8 +34,7 @@ public record ServiceConfig(
 
     public static ServiceConfig defaults(Path root) {
         return new ServiceConfig(
-                "0.0.0.0", 11420,
-                null, "", null, "", false,
+                "0.0.0.0",
                 root.resolve("objects"), root.resolve("events.log"), 100_000,
                 "master-1", "default", "", 0,
                 new LinkedHashMap<>(), 16 * 1024 * 1024,
@@ -75,12 +70,6 @@ public record ServiceConfig(
         }
         return new ServiceConfig(
                 props.getProperty("control.host", d.host()),
-                Integer.parseInt(props.getProperty("control.port", Integer.toString(d.port()))),
-                path(props, "control.keyStore", d.keyStore(), baseDir),
-                props.getProperty("control.keyStorePassword", d.keyStorePassword()),
-                path(props, "control.trustStore", d.trustStore(), baseDir),
-                props.getProperty("control.trustStorePassword", d.trustStorePassword()),
-                Boolean.parseBoolean(props.getProperty("control.requireClientCert", "true")),
                 path(props, "control.storeRoot", d.storeRoot(), baseDir),
                 path(props, "control.eventLogPath", d.eventLogPath(), baseDir),
                 Integer.parseInt(props.getProperty("control.maxEventLogEntries", Integer.toString(d.maxEventLogEntries()))),
@@ -104,9 +93,5 @@ public record ServiceConfig(
         }
         Path p = Path.of(value);
         return p.isAbsolute() ? p : baseDir.resolve(p);
-    }
-
-    public boolean tlsEnabled() {
-        return this.keyStore != null && Files.isRegularFile(this.keyStore);
     }
 }

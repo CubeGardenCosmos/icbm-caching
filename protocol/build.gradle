@@ -10,7 +10,7 @@ repositories {
 }
 
 dependencies {
-    // netty/slf4j 由消费方提供（mod: Minecraft 自带；control-service/velocity-plugin: 显式依赖），
+    // netty/slf4j 由消费方提供（mod: Minecraft 自带；velocity-plugin/virtual-backend: 显式依赖），
     // 协议模块自身只编译引用，避免版本冲突（AGENTS.md「避免重复实现」单侧实现）。
     compileOnly 'io.netty:netty-handler:4.1.115.Final'
     compileOnly 'org.slf4j:slf4j-api:2.0.16'

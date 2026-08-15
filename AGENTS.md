@@ -22,7 +22,7 @@
   - init 末尾询问是否安装基础软件（Rust 工具链、Node、pi AI 工具）。
 - Python 工具由 uv 管理（`build/pyproject.toml`、`build/uv.lock`）；功能按分层拆分在 `build/icbm_dev_env/` 包内（入口 → 编排 → 领域功能 → 基础设施），`build/main.py` 只做 uv 自举与 CLI 分发，禁止向 `main.py` 堆逻辑。
 - 所有联网操作（git/urllib/Gradle/curl）遵循 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量；Gradle 步骤由脚本翻译为 JVM 代理参数。
-- 测试服务器：`build/main.py server` 启动 `build/workspace/server` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行全部组件测试（protocol/control-service/velocity-plugin/fabric-source）；`build/main.py control` 前台启动控制服务（端口 11420，mTLS 证书由 `build/main.py certs` 生成到 `build/workspace/certs`）。
+- 测试服务器：`build/main.py server` 启动 `build/workspace/server` 的 Fabric 服务器（测试用，独立世界目录），`build/main.py test` 运行全部组件测试（protocol/velocity-plugin/virtual-backend/fabric-source）；`build/main.py control` 前台启动 master 控制服务（单端口封装通道 11420，PSK 与 UUID 角色绑定由 `build/main.py control` 生成到 `build/workspace/control-run/control.properties`；不使用 mTLS/证书）。
 - 环境重置与清理：`reinit`（删除 `build/workspace` 后重新完整部署，适合反编译结果被污染时）与 `cleanup`（删除 `build/workspace` 与各组件构建产物，腾出硬盘空间）均为破坏性操作，脚本会先请求确认。
 - `build/workspace/`、`build/.venv/`、各组件 `build/`、`.gradle/`、`run/` 目录被 Git 忽略。
 - 开发环境改动（如升级 Loom/Gradle/JDK 版本）需同步更新 `docs/VERSION_FREEZE.md`、`build/` 脚本与本文档。
@@ -65,7 +65,7 @@
       落点判定/切换、会话记账联动、健康检查）。
   - `virtual-backend/`：阶段3 已实现的独立 26.3 旁观会话后端（包 `cn.cubegarden.icbm.caching.virtual`）；
       修正后作为 slave-mod 的技术基础（只读变体参考；Nbt/对象库/ServeGate 逻辑迁移入 slave-mod）。
-  - `control-service/`：并入 master（包 `cn.cubegarden.icbm.caching.control`；对象库/事件日志/订阅逻辑成为 master 内部模块，不再独立监听端口）。
+  - `control-service/`：已并入 master（包 `cn.cubegarden.icbm.caching.control` 位于 `velocity-plugin/`；对象库/事件日志/订阅逻辑为 master 内部模块，无独立监听端口；封装通道服务由 master 提供）。
   - `auth-gateway/`：Mojang 正版验证组件（归 master 受信面：master 内实现验证 + 全局会话记账）。
   - `protocol/`：跨组件共享控制协议（包 `cn.cubegarden.icbm.caching.protocol`，纯 Java 25，netty/slf4j 由消费方提供；含包络/消息编解码、SnapshotObjectStore、ControlChannel 客户端基类）。
   - `docs/`：设计与协议文档；`build/`：Python 开发环境工具。

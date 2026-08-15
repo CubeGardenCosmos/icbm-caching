@@ -1,7 +1,6 @@
 package cn.cubegarden.icbm.caching.control;
 
 import cn.cubegarden.icbm.caching.control.config.ServiceConfig;
-import cn.cubegarden.icbm.caching.control.net.ControlServer;
 import cn.cubegarden.icbm.caching.control.net.EncapsulatedControlServer;
 import cn.cubegarden.icbm.caching.control.net.EncapsulatedControlSession;
 import cn.cubegarden.icbm.caching.control.net.PeerRegistry;
@@ -16,7 +15,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 控制服务入口（master 缓存目录）：恢复对象库与事件日志 → 启动 netty mTLS 服务。
+ * master 入口（阶段2：control-service 并入 master 后的独立进程形态；Velocity 插件入口
+ * 于阶段5 接线）：恢复对象库与事件日志 → 启动单端口封装通道服务。
  *
  * <p>配置：环境变量 {@code ICBM_CONTROL_CONFIG} 指定 properties 路径；
  * 缺省使用工作目录下 {@code control.properties} 或全默认值。
@@ -31,6 +31,9 @@ public final class ControlServiceMain {
     public static void main(String[] args) throws Exception {
         Path configPath = Path.of(System.getenv().getOrDefault("ICBM_CONTROL_CONFIG", "control.properties"));
         ServiceConfig config = loadConfig(configPath);
+        if (config.psk().isEmpty() || config.encapsulatedPort() <= 0) {
+            throw new IllegalArgumentException("封装通道未启用：需配置 control.psk（非空）与 control.encapsulatedPort（>0）");
+        }
         Files.createDirectories(config.storeRoot());
 
         SnapshotObjectStore store = new SnapshotObjectStore(config.storeRoot(), config.serverName());
@@ -40,27 +43,15 @@ public final class ControlServiceMain {
         PeerRegistry registry = new PeerRegistry(config.roleBindings());
         Replicator replicator = new Replicator(store, eventLog, config);
         ControlService service = new ControlService(store, eventLog, replicator, registry, config);
-        ControlServer server = new ControlServer(config, service, replicator, registry);
-        EncapsulatedControlServer encapsulated = null;
-        if (!config.psk().isEmpty() && config.encapsulatedPort() > 0) {
-            encapsulated = new EncapsulatedControlServer(config, service, replicator, registry,
-                    new EncapsulatedControlSession.Listener() {
-                    });
-            encapsulated.start();
-        } else {
-            LOGGER.warn("[control] 封装通道未启用（需配置 control.psk 与 control.encapsulatedPort）");
-        }
-        EncapsulatedControlServer encapsulatedRef = encapsulated;
+        EncapsulatedControlServer encapsulated = new EncapsulatedControlServer(config, service, replicator,
+                registry, new EncapsulatedControlSession.Listener() {
+                });
+        encapsulated.start();
 
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            server.stop();
-            if (encapsulatedRef != null) {
-                encapsulatedRef.close();
-            }
-        }));
-        server.start();
-        LOGGER.info("[control] 就绪：对象库={} events={} peerBindings={}",
-                config.storeRoot(), config.eventLogPath(), config.roleBindings().keySet());
+        Runtime.getRuntime().addShutdownHook(new Thread(encapsulated::close));
+        LOGGER.info("[control] master 就绪：对象库={} events={} 封装通道={}:{} psk={}位 peerBindings={}",
+                config.storeRoot(), config.eventLogPath(), config.host(), encapsulated.port(),
+                config.psk().length(), config.roleBindings().keySet());
     }
 
     private static ServiceConfig loadConfig(Path path) throws Exception {

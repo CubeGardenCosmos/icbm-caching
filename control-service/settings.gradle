@@ -1,4 +1,0 @@
-rootProject.name = 'icbm-control-service'
-
-// 共享控制协议模块（复合构建，单侧实现两侧复用）
-includeBuild('../protocol')

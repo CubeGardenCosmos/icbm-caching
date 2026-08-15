@@ -21,21 +21,19 @@ FINGERPRINTS = WORKSPACE / "fingerprints.json"
 # 组件目录（仓库根下的 Java/其他组件）
 FABRIC_SOURCE = REPO_ROOT / "fabric-source"
 PROTOCOL = REPO_ROOT / "protocol"
-CONTROL_SERVICE = REPO_ROOT / "control-service"
-VELOCITY_PLUGIN = REPO_ROOT / "velocity-plugin"
+VELOCITY_PLUGIN = REPO_ROOT / "velocity-plugin"  # master（control 逻辑已并入，阶段2）
 VIRTUAL_BACKEND = REPO_ROOT / "virtual-backend"
 REGISTRY_DUMP = REPO_ROOT / "tools" / "registry-dump"
 
 # 全部 Java 组件（构建/测试/清理按此遍历；fabric-source 为 Loom 模组，其余为纯 Java）
-JAVA_COMPONENTS = (PROTOCOL, CONTROL_SERVICE, VELOCITY_PLUGIN, VIRTUAL_BACKEND, FABRIC_SOURCE)
+JAVA_COMPONENTS = (PROTOCOL, VELOCITY_PLUGIN, VIRTUAL_BACKEND, FABRIC_SOURCE)
 
-# 控制服务运行目录与 mTLS 证书
+# 控制服务运行目录（master 独立进程形态；封装通道配置）
 CONTROL_RUN = WORKSPACE / "control-run"
-CERTS_DIR = WORKSPACE / "certs"
 
 
 def component_root(name: str) -> Path:
-    """按名字解析组件根（protocol/control-service/velocity-plugin/fabric-source）。"""
+    """按名字解析组件根（protocol/velocity-plugin/fabric-source）。"""
     return REPO_ROOT / name
 
 

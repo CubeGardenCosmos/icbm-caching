@@ -8,8 +8,8 @@ import java.util.Map;
 /**
  * 虚拟后端运行配置（properties 风格，环境变量 ICBM_VIRTUAL_BACKEND_CONFIG 指定路径）。
  *
- * <p>关键字段：游戏监听、控制服务地址（mTLS，SLAVE 角色）、本地对象库根、
- * 冻结指纹（与 registry 转储 manifest 不一致 → fail closed）、服务维度与视距。
+ * <p>关键字段：游戏监听、控制服务地址（封装通道：公共密码 + UUID，SLAVE 角色）、
+ * 本地对象库根、冻结指纹（与 registry 转储 manifest 不一致 → fail closed）、服务维度与视距。
  */
 public record VirtualBackendConfig(
         String gameHost,
@@ -17,10 +17,8 @@ public record VirtualBackendConfig(
         String controlHost,
         int controlPort,
         String serverId,
-        String keyStore,
-        String keyStorePassword,
-        String trustStore,
-        String trustStorePassword,
+        String controlPsk,
+        String controlUuid,
         String storeRoot,
         String minecraftVersion,
         int runtimeProtocol,
@@ -57,10 +55,8 @@ public record VirtualBackendConfig(
                 p.get("control.host"),
                 Integer.parseInt(p.getOrDefault("control.port", "11420")),
                 p.getOrDefault("virtualBackend.serverId", "virtual-backend-1"),
-                p.get("control.keyStore"),
-                p.getOrDefault("control.keyStorePassword", "changeit"),
-                p.get("control.trustStore"),
-                p.getOrDefault("control.trustStorePassword", "changeit"),
+                p.getOrDefault("control.psk", ""),
+                p.getOrDefault("control.uuid", "22222222222222222222222222222222"),
                 p.getOrDefault("virtualBackend.storeRoot", "build/workspace/virtual-backend/objects"),
                 p.getOrDefault("fingerprint.minecraftVersion", "26.3-snapshot-8"),
                 Integer.parseInt(p.getOrDefault("fingerprint.runtimeProtocol", "1073742154")),
