@@ -25,6 +25,7 @@ public record ServiceConfig(
         String psk,
         int encapsulatedPort,
         Map<String, String> roleBindings, // auth UUID(hex) -> role 名（SLAVE/SOURCE）
+        BackendServer backend,            // 源服 backend（velocity 授信；null = 不启用）
         int maxFrameBytes,
         int pushWindow,
         long heartbeatIntervalMillis,
@@ -32,12 +33,16 @@ public record ServiceConfig(
         int runtimeProtocol
 ) {
 
+    /** 源服 backend 连接（master 主动连接；PSK = velocity forwarding secret）。 */
+    public record BackendServer(String host, int port, String forwardingSecret) {
+    }
+
     public static ServiceConfig defaults(Path root) {
         return new ServiceConfig(
                 "0.0.0.0",
                 root.resolve("objects"), root.resolve("events.log"), 100_000,
                 "master-1", "default", "", 0,
-                new LinkedHashMap<>(), 16 * 1024 * 1024,
+                new LinkedHashMap<>(), null, 16 * 1024 * 1024,
                 64, 30_000, 90_000,
                 1_073_742_154 // 26.3-snapshot-8 runtime protocol（docs/VERSION_FREEZE.md）
         );
@@ -68,6 +73,11 @@ public record ServiceConfig(
                 bindings.put(kv[0].trim(), roleName);
             }
         }
+        String backendHost = props.getProperty("control.backendHost", "").trim();
+        int backendPort = Integer.parseInt(props.getProperty("control.backendPort", "11430"));
+        String backendSecret = props.getProperty("control.backendForwardingSecret", "").trim();
+        BackendServer backend = (!backendHost.isEmpty() && !backendSecret.isEmpty())
+                ? new BackendServer(backendHost, backendPort, backendSecret) : null;
         return new ServiceConfig(
                 props.getProperty("control.host", d.host()),
                 path(props, "control.storeRoot", d.storeRoot(), baseDir),
@@ -78,6 +88,7 @@ public record ServiceConfig(
                 props.getProperty("control.psk", d.psk()),
                 Integer.parseInt(props.getProperty("control.encapsulatedPort", Integer.toString(d.encapsulatedPort()))),
                 bindings,
+                backend,
                 Integer.parseInt(props.getProperty("control.maxFrameBytes", Integer.toString(d.maxFrameBytes()))),
                 Integer.parseInt(props.getProperty("control.pushWindow", Integer.toString(d.pushWindow()))),
                 Long.parseLong(props.getProperty("control.heartbeatIntervalMillis", Long.toString(d.heartbeatIntervalMillis()))),

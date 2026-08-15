@@ -70,6 +70,28 @@ public final class PeerRegistry {
         return null;
     }
 
+    /**
+     * 源服 backend 注册（里程碑 3：master 主动连源服，velocity 授信）。
+     * 只做源指纹登记与会话注册；HELLO 校验（sourceServerId/指纹）由 SourceConnector 完成。
+     * 返回拒绝原因（null 表示接受）。
+     */
+    public String registerSource(ControlSession session, String modpackFingerprint,
+                                 String registryFingerprint) {
+        if (modpackFingerprint.isEmpty() || registryFingerprint.isEmpty()) {
+            return "源必须提供 modpack/registry fingerprint";
+        }
+        if (!this.sourceModpackFingerprint.isEmpty()
+                && !this.sourceModpackFingerprint.equals(modpackFingerprint)) {
+            return "modpack fingerprint 与已注册源不一致";
+        }
+        this.sourceModpackFingerprint = modpackFingerprint;
+        this.sourceRegistryFingerprint = registryFingerprint;
+        this.sessions.put(session.sourceServerId(), session);
+        this.roles.put(session.sourceServerId(), Role.SOURCE);
+        LOGGER.info("[control] 源注册（backend）: id={}", session.sourceServerId());
+        return null;
+    }
+
     public void unregister(String sourceServerId) {
         if (sourceServerId != null) {
             this.sessions.remove(sourceServerId);

@@ -16,7 +16,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 import java.util.UUID;
-import javax.net.ssl.SSLContext;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerBlockEntityEvents;
@@ -38,8 +37,9 @@ import org.slf4j.LoggerFactory;
  * 快照发布 → tick 驱动），服务器停止时关闭 sink 并清除运行时。
  *
  * <p>sink 选择：服务器根目录 {@code icbm-control.properties} 配置了
- * {@code icbm.control.host} 时使用控制服务远端 sink（mTLS），否则本地对象库 sink
- * （开发模式）。控制服务不可用时发布器 fail closed（保持 dirty 重试，不产生不确定基线）。
+ * {@code icbm.backend.forwardingSecret} 时启动 backend 监听（velocity 授信模式，master 主动
+ * 连接），否则本地对象库 sink（开发模式）。控制服务不可用时发布器 fail closed
+ * （保持 dirty 重试，不产生不确定基线）。
  */
 public final class IcbmSource implements ModInitializer {
 
@@ -132,7 +132,8 @@ public final class IcbmSource implements ModInitializer {
                 IcbmCommand.register(dispatcher));
     }
 
-    /** 构建 sink：配置了 icbm.control.host 用控制服务远端 sink，否则本地对象库（开发模式）。 */
+    /** 构建 sink：配置了 icbm.backend.forwardingSecret 时启动 backend 监听（velocity 授信模式，
+     *  master 主动连接），否则本地对象库（开发模式）。 */
     private static SnapshotSink createSink(net.minecraft.server.MinecraftServer server) {
         Path configPath = server.getWorldPath(LevelResource.ROOT).resolve("icbm-control.properties");
         Properties props = new Properties();
@@ -143,7 +144,7 @@ public final class IcbmSource implements ModInitializer {
                 LOGGER.error("[icbm-source] 读取 icbm-control.properties 失败，回退本地 sink", e);
             }
         }
-        String host = props.getProperty("icbm.control.host", "").trim();
+        String forwardingSecret = props.getProperty("icbm.backend.forwardingSecret", "").trim();
         // serverName：velocity.toml 服务器名（缓存隔离键，CACHE_PROTOCOL §1）；缺省退回 sourceServerId
         String sourceServerId = props.getProperty("icbm.control.sourceServerId",
                 "source-" + UUID.randomUUID().toString().substring(0, 8));
@@ -151,21 +152,17 @@ public final class IcbmSource implements ModInitializer {
         if (serverName.isEmpty()) {
             serverName = sourceServerId;
         }
-        if (host.isEmpty()) {
-            LOGGER.warn("[icbm-source] 未配置 icbm.control.host，使用本地对象库 sink（开发模式）");
+        if (forwardingSecret.isEmpty()) {
+            LOGGER.warn("[icbm-source] 未配置 icbm.backend.forwardingSecret，使用本地对象库 sink（开发模式）");
             return new LocalSnapshotSink(
                     server.getWorldPath(LevelResource.ROOT).resolve("icbm_snapshots"), serverName);
         }
-        int port = Integer.parseInt(props.getProperty("icbm.control.port", "11420"));
-        Path keyStore = resolve(server, props.getProperty("icbm.control.keystore", ""));
-        String keyStorePassword = props.getProperty("icbm.control.keystorePassword", "");
-        Path trustStore = resolve(server, props.getProperty("icbm.control.truststore", ""));
-        String trustStorePassword = props.getProperty("icbm.control.truststorePassword", "");
+        String bindHost = props.getProperty("icbm.backend.bind", "0.0.0.0").trim();
+        int bindPort = Integer.parseInt(props.getProperty("icbm.backend.port", "11430"));
+        String registryFingerprint = registryFingerprint(server);
         try {
-            SSLContext ssl = tlsContext(keyStore, keyStorePassword, trustStore, trustStorePassword);
-            String registryFingerprint = registryFingerprint(server);
             RemoteSnapshotSink sink = new RemoteSnapshotSink(
-                    host, port, sourceServerId, serverName,
+                    bindHost, bindPort, forwardingSecret, sourceServerId, serverName,
                     net.minecraft.SharedConstants.getCurrentVersion().name(),
                     net.minecraft.SharedConstants.getProtocolVersion(),
                     net.fabricmc.loader.api.FabricLoader.getInstance()
@@ -174,41 +171,20 @@ public final class IcbmSource implements ModInitializer {
                     net.fabricmc.loader.api.FabricLoader.getInstance()
                             .getModContainer("fabric-api")
                             .map(m -> m.getMetadata().getVersion().getFriendlyString()).orElse("?"),
-                    ModpackFingerprint.compute(server), registryFingerprint,
-                    ssl, 15_000, 1_000);
+                    ModpackFingerprint.compute(server), registryFingerprint);
             sink.start();
-            LOGGER.info("[icbm-source] 控制服务远端 sink: {}:{}（sourceServerId={}）", host, port, sourceServerId);
+            LOGGER.info("[icbm-source] backend 监听: {}:{}（velocity 授信，sourceServerId={}）",
+                    bindHost, sink.port(), sourceServerId);
             return sink;
         } catch (Exception e) {
-            LOGGER.error("[icbm-source] 控制服务 sink 初始化失败（fail closed）: {}", e.toString());
-            throw new IllegalStateException("icbm-control 配置无效，无法建立控制通道", e);
+            LOGGER.error("[icbm-source] backend sink 初始化失败（fail closed）: {}", e.toString());
+            throw new IllegalStateException("icbm-control 配置无效，无法启动 backend 通道", e);
         }
     }
 
     private static Path resolve(net.minecraft.server.MinecraftServer server, String path) {
         Path p = Path.of(path);
         return p.isAbsolute() ? p : server.getWorldPath(LevelResource.ROOT).resolve(p);
-    }
-
-    private static SSLContext tlsContext(Path keyStore, String keyStorePassword,
-                                         Path trustStore, String trustStorePassword) throws Exception {
-        java.security.KeyStore ks = java.security.KeyStore.getInstance("PKCS12");
-        try (var in = Files.newInputStream(keyStore)) {
-            ks.load(in, keyStorePassword.toCharArray());
-        }
-        javax.net.ssl.KeyManagerFactory kmf = javax.net.ssl.KeyManagerFactory.getInstance(
-                javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
-        kmf.init(ks, keyStorePassword.toCharArray());
-        java.security.KeyStore ts = java.security.KeyStore.getInstance("PKCS12");
-        try (var in = Files.newInputStream(trustStore)) {
-            ts.load(in, trustStorePassword.toCharArray());
-        }
-        javax.net.ssl.TrustManagerFactory tmf = javax.net.ssl.TrustManagerFactory.getInstance(
-                javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
-        tmf.init(ts);
-        SSLContext ctx = SSLContext.getInstance("TLS");
-        ctx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-        return ctx;
     }
 
     private static String registryFingerprint(net.minecraft.server.MinecraftServer server) {

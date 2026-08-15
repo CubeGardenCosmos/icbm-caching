@@ -21,6 +21,7 @@ def write_control_config() -> None:
     run_dir = paths.CONTROL_RUN
     run_dir.mkdir(parents=True, exist_ok=True)
     psk = secrets.token_hex(32)
+    backend_secret = secrets.token_hex(32)  # velocity forwarding secret（与源服 icbm-control.properties 一致）
     # 固定示例对等方（UUID 为 AUTH 身份；source/slave 的正式 UUID 由部署方决定）
     source_uuid = "0102030405060708090a0b0c0d0e0f10"
     slave_uuid = "1112131415161718191a1b1c1d1e1f20"
@@ -33,13 +34,18 @@ def write_control_config() -> None:
         "control.serverName=lobby-1\n"
         "control.psk={psk}\n"
         "control.roleBindings={source_uuid}=SOURCE,{slave_uuid}=SLAVE\n"
+        "control.backendHost=127.0.0.1\n"
+        "control.backendPort=11430\n"
+        "control.backendForwardingSecret={backend_secret}\n"
         "control.pushWindow=64\n"
         "control.heartbeatIntervalMillis=30000\n"
         "control.lagThresholdMillis=90000\n"
-    ).format(run=run_dir, psk=psk, source_uuid=source_uuid, slave_uuid=slave_uuid)
+    ).format(run=run_dir, psk=psk, source_uuid=source_uuid, slave_uuid=slave_uuid,
+             backend_secret=backend_secret)
     (run_dir / "control.properties").write_text(props)
     print(f"master 配置: {run_dir / 'control.properties'}")
     print(f"  PSK={psk}（仅本次生成；部署时按运维手册安全分发）")
+    print(f"  backendForwardingSecret={backend_secret}（需同步到源服 icbm-control.properties）")
     print(f"  角色绑定: SOURCE={source_uuid} SLAVE={slave_uuid}")
 
 

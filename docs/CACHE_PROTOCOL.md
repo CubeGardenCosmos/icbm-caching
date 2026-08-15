@@ -40,6 +40,22 @@ slave↔master 使用**单端口封装通道**（master 只监听一个端口，
 源服↔master 使用 **velocity 授信模式**（modern forwarding secret，内网，master 主动连接），
 不经封装通道；承载快照/失效/epoch/操作终态消息事件（无玩家在线时也可用）。
 
+### 1.2 源服 backend 通道（velocity 授信，里程碑 3；草稿 `draft/backend-velocity-trust`）
+
+- 方向：**master 主动连接**源服 Fabric 模组监听的 backend 端口（`icbm.backend.*`）；
+  无玩家在线也可用（独立受信长连接，不依赖玩家会话）。
+- 传输：复用封装通道传输层（magic + AUTH 帧 + HKDF + ChaCha20-Poly1305 + CONTROL 流），
+  **PSK = velocity forwarding secret**（velocity.toml `forwarding-secret`）；不使用 TLS。
+- AUTH：master 为客户端，`token = HMAC-SHA256(secret, "ICBM-AUTH" ‖ masterUuid ‖ clientNonce)`
+  前 16 字节（与 §1.1 同机制）；源服校验失败 → AUTH_ACK(false) 关闭（fail closed）。
+- 握手方向与 slave 通道相反：**源服（服务端）主动发 HELLO**（role=SOURCE + sourceServerId +
+  serverName + 指纹 + runtimeProtocol；包络 sourceServerId 为源服标识），master 验证并回
+  HELLO_ACK（accepted/reason）；源服 HELLO 校验失败（指纹/runtimeProtocol/版本不匹配）→
+  HELLO_ACK(false) 并关闭，master 退避重连。
+- 事件流不变：源服发 WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT（包络序号自增，master 防重放），
+  master 回 PUT_SNAPSHOT_ACK/ERROR；源服定期 HEARTBEAT（master 读超时误断防护）。
+- 无玩家时事件可达：master 主动连接 + 断线重连，事件经 master 对象库/事件日志推 slave。
+
 只有源服对世界操作的最终裁决进入源 Fabric 的主线程；复制、订阅、失效与快照均不依赖
 Minecraft tick。请求大小限制（单帧上限可配置，默认 16 MiB；PUT_SNAPSHOT payload 单独上限
 64 MiB）、连接速率与审计日志由 master 实施。

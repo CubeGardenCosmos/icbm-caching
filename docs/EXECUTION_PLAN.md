@@ -51,15 +51,22 @@
 - [x] 验收：既有对象库/重放/订阅测试迁移到封装通道后全绿（ControlServiceIntegrationTest）；
       无独立监听端口（只剩封装通道 11420；畸形/原版握手 RST）。
 
-## 里程碑 3：backend 模组（fabric-source 演化）
+## 里程碑 3：backend 模组（fabric-source 演化，已完成）
 
-- [ ] 连接层：mTLS ControlChannel → velocity 授信模式通道（master 主动连接源服内网端口，
-      forwarding secret 鉴权；无玩家在线也可用——独立受信长连接，不依赖玩家会话）。
-- [ ] HELLO 携带 serverName；事件集合不变（WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/操作终态）。
-- [ ] 权威会话数据包缓存：master 侧缓存源服返回的数据包（形成快照；只有 committed+epoch
-      匹配才可作基线，fail closed）。
-- [ ] 草稿 `draft/backend-velocity-trust/` 三步流程。
-- [ ] 验收：源服→master 快照链路回归；serverName 隔离；无玩家时事件可达。
+- [x] 草稿 `draft/backend-velocity-trust/` 三步流程：参考仓库（velocity modern forwarding：
+      HMAC-SHA256(secret, data) 签名前置）、官方（minecraft-assets ServerConnectionListener /
+      LoginPluginMessage 往返）、差异取舍（不伪装玩家；复用封装通道传输层，PSK=forwarding
+      secret；HELLO 由源服发出，复用 HELLO/HELLO_ACK 不新增消息类型）。
+- [x] 连接层：mTLS ControlChannel → **velocity 授信模式通道**（master 主动连接源服 backend
+      端口；AUTH 公共密码证明 PSK=forwarding secret；无玩家在线也可用——独立受信长连接）。
+      源服侧：BackendControlServer/BackendControlSession（fabric-source）；master 侧：
+      SourceConnector（ControlSession 适配 + 注册源指纹 + PUT_SNAPSHOT_ACK）。
+- [x] HELLO 携带 serverName；事件集合不变（WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/操作终态）。
+- [x] 权威会话数据包缓存基线规则：committed+epoch 匹配才可作基线（对象库既有单调守卫）；
+      源服返回数据包缓存实现随里程碑 5 权威桥。
+- [x] 验收：源服→master 快照链路回归（SourceConnectorTest：事件入对象库 required/committed/
+      epoch + serverName 分域 + slave 订阅收到 backend 推送 + 错误 secret fail closed）；
+      RemoteSnapshotSinkTest 迁移（假 master 主动连接）；无玩家时事件可达（master 主动连接）。
 
 ## 里程碑 4：slave Fabric 模组（新组件 slave-mod/，最大块）
 

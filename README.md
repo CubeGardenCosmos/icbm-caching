@@ -15,7 +15,9 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
 ```
 
 - **源 Fabric 服务器（`fabric-source/`）**：唯一能提交世界写入与裁决冲突的节点；产生
-  WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/操作终态消息事件。
+  WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/操作终态消息事件。连接层为 velocity 授信模式：源服
+  模组监听 backend 端口（`icbm.backend.*`，PSK = forwarding secret），master 主动连接（无玩家
+  在线也可用），方向与 slave 封装通道相反（源服发 HELLO，master 验证）。
 - **master（`velocity-plugin/`，含已并入的 `cn.cubegarden.icbm.caching.control` 包）**：唯一信任根与
   决策中心；Mojang 正版验证、全局会话记账（防同一玩家加入多个 slave）、单端口封装通道、
   required/committed revision 快照聚合。独立进程形态入口 `ControlServiceMain`（Velocity 插件

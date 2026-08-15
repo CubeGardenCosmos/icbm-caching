@@ -34,7 +34,10 @@ import org.slf4j.LoggerFactory;
  * <p>职责（与 {@link ControlChannel} 对齐，但传输为单端口封装通道）：
  * <ol>
  *   <li>连接 → AUTH 握手（HMAC 公共密码证明 + UUID 明文 + clientNonce）→ 读 AUTH_ACK；</li>
- *   <li>HKDF 派生双向会话密钥（ChaCha20-Poly1305）→ HELLO（序号 1）→ HELLO_ACK；</li>
+ *   <li>HKDF 派生双向会话密钥（ChaCha20-Poly1305）；</li>
+ *   <li>HELLO 握手（两种方向）：CLIENT_HELLO（本端发 HELLO，等 HELLO_ACK；slave/源服连
+ *       master）或 SERVER_HELLO（等对端源服发 HELLO，回调验证后回 HELLO_ACK；master 连源服
+ *       ——backend velocity 授信模式，草稿 backend-velocity-trust §3）；</li>
  *   <li>ACTIVE 后所有帧加密（streamId=CONTROL），包络序号自增；</li>
  *   <li>断线自动重连（退避）并回调 {@link Listener#onConnected} 供子类重放/重订阅。</li>
  * </ol>
@@ -47,6 +50,12 @@ public class EncapsulatedChannelClient implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(EncapsulatedChannelClient.class);
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /** HELLO 握手方向：本端发（连 master）或对端发（master 连源服 backend）。 */
+    public enum HandshakeMode {
+        CLIENT_HELLO,
+        SERVER_HELLO,
+    }
+
     /** 通道事件回调（子类在重连后按需重放/重订阅）。 */
     public interface Listener {
         /** HELLO 握手成功（含重连后）。 */
@@ -55,6 +64,15 @@ public class EncapsulatedChannelClient implements AutoCloseable {
 
         /** HELLO/AUTH 被拒绝（reason 非空）；连接随后关闭。 */
         default void onRejected(String reason) {
+        }
+
+        /**
+         * SERVER_HELLO 模式：对端（源服）发来 HELLO（envelope/body 原始字节）。
+         * 调用方验证后必须 {@code send(HELLO_ACK, requestId, ...)} 并返回是否接受；
+         * 返回 false → 连接关闭（不进入 ACTIVE）。默认拒绝。
+         */
+        default boolean onServerHello(Envelope envelope, byte[] body) {
+            return false;
         }
 
         /** 入站消息（body 为包络原始字节；子类按 type 解码）。 */
@@ -86,6 +104,7 @@ public class EncapsulatedChannelClient implements AutoCloseable {
     private final String uuidHex; // AUTH 身份（每 peer 固定；role 由 master 注册表决定）
     private final byte[] psk;
     private final HelloConfig helloConfig;
+    private final HandshakeMode handshakeMode;
     private final long readTimeoutMillis;
     private final long reconnectBackoffMillis;
     private final boolean autoReconnect;
@@ -114,12 +133,30 @@ public class EncapsulatedChannelClient implements AutoCloseable {
             boolean autoReconnect,
             Listener listener
     ) {
+        this(host, port, sourceServerId, uuidHex, psk, helloConfig, HandshakeMode.CLIENT_HELLO,
+                readTimeoutMillis, reconnectBackoffMillis, autoReconnect, listener);
+    }
+
+    public EncapsulatedChannelClient(
+            String host,
+            int port,
+            String sourceServerId,
+            String uuidHex,
+            String psk,
+            HelloConfig helloConfig,
+            HandshakeMode handshakeMode,
+            long readTimeoutMillis,
+            long reconnectBackoffMillis,
+            boolean autoReconnect,
+            Listener listener
+    ) {
         this.host = host;
         this.port = port;
         this.sourceServerId = sourceServerId;
         this.uuidHex = uuidHex;
         this.psk = psk.getBytes(StandardCharsets.UTF_8);
         this.helloConfig = helloConfig;
+        this.handshakeMode = handshakeMode;
         this.readTimeoutMillis = readTimeoutMillis;
         this.reconnectBackoffMillis = reconnectBackoffMillis;
         this.autoReconnect = autoReconnect;
@@ -197,6 +234,10 @@ public class EncapsulatedChannelClient implements AutoCloseable {
         this.encryptCipher = keys.clientToServer();
         this.decryptCipher = keys.serverToClient();
 
+        if (this.handshakeMode == HandshakeMode.SERVER_HELLO) {
+            this.awaitServerHello();
+            return;
+        }
         this.sendHandshake();
         deadline = System.currentTimeMillis() + ProtocolConstants.HELLO_TIMEOUT_MILLIS;
         while (System.currentTimeMillis() < deadline) {
@@ -219,6 +260,27 @@ public class EncapsulatedChannelClient implements AutoCloseable {
             }
         }
         throw new IOException("HELLO 握手超时");
+    }
+
+    /** SERVER_HELLO 模式：等对端（源服）发 HELLO，回调验证并回 HELLO_ACK 后进入 ACTIVE。 */
+    private void awaitServerHello() throws IOException {
+        long deadline = System.currentTimeMillis() + ProtocolConstants.HELLO_TIMEOUT_MILLIS;
+        while (System.currentTimeMillis() < deadline) {
+            Envelope hello = this.readControlFrame();
+            if (hello.messageType() == MessageType.HELLO) {
+                boolean accepted = this.listener.onServerHello(hello, hello.body());
+                if (!accepted) {
+                    this.handshakeRejected = true;
+                    this.listener.onRejected("backend HELLO 验证失败");
+                    this.closeSocket();
+                    return;
+                }
+                this.listener.onConnected(hello.sourceServerId());
+                this.startReader();
+                return;
+            }
+        }
+        throw new IOException("backend HELLO 握手超时");
     }
 
     private void sendHandshake() throws IOException {

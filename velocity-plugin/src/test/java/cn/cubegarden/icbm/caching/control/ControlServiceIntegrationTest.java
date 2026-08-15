@@ -82,6 +82,7 @@ class ControlServiceIntegrationTest {
                 this.tempDir.resolve("objects"), this.tempDir.resolve("events.log"), 1000,
                 "master-1", "lobby-1", PSK, 0,
                 roleBindings("source-server", "SOURCE", "slave-a", "SLAVE", "slave-b", "SLAVE"),
+                null,
                 16 * 1024 * 1024, 8, 20_000, 40_000,
                 1073742154
         );
@@ -526,6 +527,7 @@ class ControlServiceIntegrationTest {
                 "127.0.0.1",
                 this.config.storeRoot(), this.config.eventLogPath(), 1000, "master-1", "lobby-1", PSK, 0,
                 roleBindings("source-server", "SOURCE", "slave-a", "SLAVE", "slave-b", "SLAVE"),
+                null,
                 16 * 1024 * 1024, 8, 20_000, 40_000, 1073742154);
         SnapshotObjectStore recovered = new SnapshotObjectStore(restarted.storeRoot(), restarted.serverName());
         recovered.recover();

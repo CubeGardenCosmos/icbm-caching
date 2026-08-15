@@ -4,6 +4,7 @@ import cn.cubegarden.icbm.caching.control.config.ServiceConfig;
 import cn.cubegarden.icbm.caching.control.net.EncapsulatedControlServer;
 import cn.cubegarden.icbm.caching.control.net.EncapsulatedControlSession;
 import cn.cubegarden.icbm.caching.control.net.PeerRegistry;
+import cn.cubegarden.icbm.caching.control.net.SourceConnector;
 import cn.cubegarden.icbm.caching.control.replication.EventLog;
 import cn.cubegarden.icbm.caching.control.replication.Replicator;
 import cn.cubegarden.icbm.caching.control.service.ControlService;
@@ -48,10 +49,23 @@ public final class ControlServiceMain {
                 });
         encapsulated.start();
 
-        Runtime.getRuntime().addShutdownHook(new Thread(encapsulated::close));
-        LOGGER.info("[control] master 就绪：对象库={} events={} 封装通道={}:{} psk={}位 peerBindings={}",
+        SourceConnector sourceConnector = null;
+        if (config.backend() != null) {
+            sourceConnector = new SourceConnector(config, service, replicator, registry);
+            sourceConnector.start();
+        }
+        SourceConnector sourceRef = sourceConnector;
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            encapsulated.close();
+            if (sourceRef != null) {
+                sourceRef.close();
+            }
+        }));
+        LOGGER.info("[control] master 就绪：对象库={} events={} 封装通道={}:{} psk={}位 peerBindings={} backend={}",
                 config.storeRoot(), config.eventLogPath(), config.host(), encapsulated.port(),
-                config.psk().length(), config.roleBindings().keySet());
+                config.psk().length(), config.roleBindings().keySet(),
+                config.backend() == null ? "未启用" : config.backend().host() + ":" + config.backend().port());
     }
 
     private static ServiceConfig loadConfig(Path path) throws Exception {

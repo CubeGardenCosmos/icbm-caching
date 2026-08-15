@@ -4,106 +4,116 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import cn.cubegarden.icbm.caching.protocol.DimensionRef;
 import cn.cubegarden.icbm.caching.protocol.Envelope;
-import cn.cubegarden.icbm.caching.protocol.FrameCodec;
 import cn.cubegarden.icbm.caching.protocol.MessageType;
 import cn.cubegarden.icbm.caching.protocol.Messages;
+import cn.cubegarden.icbm.caching.protocol.PutResult;
+import cn.cubegarden.icbm.caching.protocol.Role;
+import cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient;
 import cn.cubegarden.icbm.caching.source.revision.ChunkKey;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.resources.Identifier;
 import org.junit.jupiter.api.Test;
 
 /**
- * 远端 sink 集成测试（假控制服务：明文 socket + 帧协议）。
+ * 远端 sink 集成测试（里程碑 3：velocity 授信模式，master 主动连接 backend 端口；
+ * 假 master = 封装通道客户端 SERVER_HELLO 方向）。
  *
- * <p>覆盖：HELLO 指纹、INVALIDATE→PUT_SNAPSHOT 顺序与 ACK 回调、断线重连补发、
- * sink 不可用时 fail closed。
+ * <p>覆盖：AUTH（forwarding secret）→ HELLO（SOURCE + 指纹）→ HELLO_ACK；
+ * INVALIDATE→PUT_SNAPSHOT 顺序与 ACK 回调；master 断开重连后补发；
+ * sink 未连接时 fail closed。
  */
 class RemoteSnapshotSinkTest {
 
     private static final ChunkKey KEY = ChunkKey.of(Identifier.fromNamespaceAndPath("minecraft", "overworld"), 3, -1);
-    private static final ChunkKey KEY2 = ChunkKey.of(Identifier.fromNamespaceAndPath("minecraft", "overworld"), 4, 5);
+    private static final String SECRET = "velocity-forwarding-secret";
 
     private static ChunkSnapshot snapshot(long revision) {
         return ChunkSnapshot.of(KEY, revision, 1, new byte[] {1, 2, 3}, 3);
     }
 
-    private RemoteSnapshotSink sink(int port, List<String> events) {
+    private static RemoteSnapshotSink sink() throws Exception {
         RemoteSnapshotSink sink = new RemoteSnapshotSink(
-                "127.0.0.1", port, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
-                "modpack-hash", "registry-hash", null, 5000, 100);
+                "127.0.0.1", 0, SECRET, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
+                "modpack-hash", "registry-hash");
+        sink.start();
         return sink;
     }
 
-    private static Envelope readFrame(DataInputStream in) throws Exception {
-        int length = in.readInt();
-        byte[] frame = new byte[length];
-        in.readFully(frame);
-        return FrameCodec.decodeFrame(frame);
-    }
+    /** 假 master：AUTH（forwarding secret）→ 等源服 HELLO → 验证 → HELLO_ACK → 收事件。 */
+    private static final class FakeMaster implements AutoCloseable {
+        final EncapsulatedChannelClient client;
+        final List<String> seen = new CopyOnWriteArrayList<>();
+        final CountDownLatch connected = new CountDownLatch(1);
+        final CountDownLatch putReceived = new CountDownLatch(1);
+        final AtomicLong ackSeq = new AtomicLong(100);
 
-    private static void writeFrame(DataOutputStream out, Envelope envelope) throws Exception {
-        byte[] frame = FrameCodec.encodeFrame(envelope);
-        out.writeInt(frame.length);
-        out.write(frame);
-        out.flush();
-    }
+        FakeMaster(int port, String secret) throws Exception {
+            this(port, secret, "0102030405060708090a0b0c0d0e0f10");
+        }
 
-    /** 假控制服务：接受一次连接，读取 HELLO 与消息，按需回复 ACK。 */
-    private static Socket acceptHandshake(ServerSocket server) throws Exception {
-        Socket socket = server.accept();
-        DataInputStream in = new DataInputStream(socket.getInputStream());
-        DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-        Envelope hello = readFrame(in);
-        assertEquals(MessageType.HELLO, hello.messageType());
-        Messages.Hello helloBody = cn.cubegarden.icbm.caching.protocol.client.ControlChannel.decode(
-                MessageType.HELLO, hello.body());
-        assertEquals("modpack-hash", helloBody.modpackFingerprint());
-        assertEquals("registry-hash", helloBody.registryAndDatapackFingerprint());
-        writeFrame(out, Envelope.of(MessageType.HELLO_ACK, hello.requestId(), "master-1", 0, 1,
-                System.currentTimeMillis(), cn.cubegarden.icbm.caching.protocol.client.ControlChannel.encode(
-                MessageType.HELLO_ACK, new Messages.HelloAck(true, "", "master-1"))));
-        return socket;
+        FakeMaster(int port, String secret, String uuidHex) throws Exception {
+            this.client = new EncapsulatedChannelClient("127.0.0.1", port, "master-1", uuidHex, secret,
+                    null, EncapsulatedChannelClient.HandshakeMode.SERVER_HELLO,
+                    5000, 100, false, new EncapsulatedChannelClient.Listener() {
+                        @Override
+                        public boolean onServerHello(Envelope envelope, byte[] body) {
+                            Messages.Hello hello = EncapsulatedChannelClient.decode(MessageType.HELLO, body);
+                            if (hello.role() != Role.SOURCE || !"modpack-hash".equals(hello.modpackFingerprint())) {
+                                FakeMaster.this.client.send(MessageType.HELLO_ACK, envelope.requestId(), 0,
+                                        EncapsulatedChannelClient.encode(MessageType.HELLO_ACK,
+                                                new Messages.HelloAck(false, "fingerprint 不一致", "master-1")));
+                                return false;
+                            }
+                            FakeMaster.this.client.send(MessageType.HELLO_ACK, envelope.requestId(), 0,
+                                    EncapsulatedChannelClient.encode(MessageType.HELLO_ACK,
+                                            new Messages.HelloAck(true, "", "master-1")));
+                            return true;
+                        }
+
+                        @Override
+                        public void onConnected(String serverId) {
+                            FakeMaster.this.connected.countDown();
+                        }
+
+                        @Override
+                        public void onMessage(MessageType type, Envelope envelope, byte[] body) {
+                            FakeMaster.this.seen.add(type.name());
+                            if (type == MessageType.PUT_SNAPSHOT) {
+                                FakeMaster.this.putReceived.countDown();
+                                FakeMaster.this.client.send(MessageType.PUT_SNAPSHOT_ACK, envelope.requestId(), 0,
+                                        EncapsulatedChannelClient.encode(MessageType.PUT_SNAPSHOT_ACK,
+                                                new Messages.PutSnapshotAck(
+                                                        DimensionRef.of("minecraft", "overworld"),
+                                                        3, -1, 5, PutResult.OK)));
+                            }
+                        }
+                    });
+            this.client.start();
+        }
+
+        void awaitConnected() throws Exception {
+            assertTrue(this.connected.await(5, TimeUnit.SECONDS), "backend HELLO 握手失败");
+        }
+
+        @Override
+        public void close() {
+            this.client.close();
+        }
     }
 
     @Test
     void invalidatePutOrderAndAckCallbacks() throws Exception {
-        try (ServerSocket server = new ServerSocket(0)) {
-            List<String> serverSeen = new CopyOnWriteArrayList<>();
-            Thread serverThread = new Thread(() -> {
-                try (Socket socket = acceptHandshake(server)) {
-                    DataInputStream in = new DataInputStream(socket.getInputStream());
-                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-                    for (int i = 0; i < 2; i++) {
-                        Envelope msg = readFrame(in);
-                        serverSeen.add(msg.messageType().name());
-                        if (msg.messageType() == MessageType.PUT_SNAPSHOT) {
-                            writeFrame(out, Envelope.of(MessageType.PUT_SNAPSHOT_ACK, msg.requestId(),
-                                    "master-1", 0, 100 + i, System.currentTimeMillis(),
-                                    cn.cubegarden.icbm.caching.protocol.client.ControlChannel.encode(
-                                            MessageType.PUT_SNAPSHOT_ACK,
-                                            new Messages.PutSnapshotAck(
-                                                    cn.cubegarden.icbm.caching.protocol.DimensionRef.of("minecraft", "overworld"),
-                                                    3, -1, 5, cn.cubegarden.icbm.caching.protocol.PutResult.OK))));
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-            });
-            serverThread.setDaemon(true);
-            serverThread.start();
-
-            RemoteSnapshotSink sink = sink(server.getLocalPort(), new CopyOnWriteArrayList<>());
-            sink.start();
-            // 等待连接完成
-            Thread.sleep(300);
+        RemoteSnapshotSink sink = sink();
+        try (FakeMaster master = new FakeMaster(sink.port(), SECRET)) {
+            master.awaitConnected();
+            Thread.sleep(200);
 
             sink.raiseRequiredRevision(KEY, 5);
             CompletableFuture<SnapshotSink.PutResult> putDone = new CompletableFuture<>();
@@ -112,67 +122,70 @@ class RemoteSnapshotSinkTest {
             sink.commitRevision(KEY, 5, (key, revision, ok) -> commitDone.complete(ok));
 
             assertEquals(SnapshotSink.PutResult.OK, putDone.get(5, TimeUnit.SECONDS));
-            assertTrue(commitDone.get(5, TimeUnit.SECONDS), "服务端随 PUT 原子提交后 commit 必须成功");
-            serverThread.join(3000);
-            assertEquals(List.of("INVALIDATE", "PUT_SNAPSHOT"), serverSeen, "顺序必须 INVALIDATE → PUT_SNAPSHOT");
-            sink.close();
+            assertTrue(commitDone.get(5, TimeUnit.SECONDS), "master 随 PUT 原子提交后 commit 必须成功");
+            Thread.sleep(300);
+            assertEquals(List.of("INVALIDATE", "PUT_SNAPSHOT"), master.seen,
+                    "顺序必须 INVALIDATE → PUT_SNAPSHOT");
         }
+        sink.close();
     }
 
     @Test
     void notConnectedFailsClosed() {
-        RemoteSnapshotSink sink = sink(1, new CopyOnWriteArrayList<>()); // 端口 1 不可达
+        RemoteSnapshotSink sink = new RemoteSnapshotSink(
+                "127.0.0.1", 1, SECRET, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3",
+                "0.157.1+26.3", "modpack-hash", "registry-hash");
         assertFalse(sink.available(), "未连接时不可用（fail closed）");
         sink.close();
     }
 
     @Test
-    void disconnectedReplaysOutstandingOps() throws Exception {
-        try (ServerSocket server = new ServerSocket(0)) {
-            List<String> serverSeen = new CopyOnWriteArrayList<>();
-            // 第一次连接：握手后立即断开 → 触发重连；第二次连接：收到补发
-            Thread serverThread = new Thread(() -> {
-                try {
-                    Socket first = acceptHandshake(server);
-                    first.close(); // 强制断开
-                    Socket second = acceptHandshake(server);
-                    DataInputStream in = new DataInputStream(second.getInputStream());
-                    DataOutputStream out = new DataOutputStream(second.getOutputStream());
-                    // 重连后补发顺序：INVALIDATE → PUT_SNAPSHOT
-                    for (int i = 0; i < 2; i++) {
-                        Envelope msg = readFrame(in);
-                        serverSeen.add(msg.messageType().name());
-                        if (msg.messageType() == MessageType.PUT_SNAPSHOT) {
-                            writeFrame(out, Envelope.of(MessageType.PUT_SNAPSHOT_ACK, msg.requestId(),
-                                    "master-1", 0, 200, System.currentTimeMillis(),
-                                    cn.cubegarden.icbm.caching.protocol.client.ControlChannel.encode(
-                                            MessageType.PUT_SNAPSHOT_ACK,
-                                            new Messages.PutSnapshotAck(
-                                                    cn.cubegarden.icbm.caching.protocol.DimensionRef.of("minecraft", "overworld"),
-                                                    3, -1, 5, cn.cubegarden.icbm.caching.protocol.PutResult.OK))));
-                            break;
-                        }
+    void wrongSecretAuthRejected() throws Exception {
+        RemoteSnapshotSink sink = sink();
+        // 错误 forwarding secret：AUTH 校验失败 → 源服拒绝，连接关闭
+        try (EncapsulatedChannelClient bad = new EncapsulatedChannelClient("127.0.0.1", sink.port(),
+                "evil-master", "0102030405060708090a0b0c0d0e0f10", "wrong-secret",
+                null, EncapsulatedChannelClient.HandshakeMode.SERVER_HELLO,
+                5000, 100, false, new EncapsulatedChannelClient.Listener() {
+                    @Override
+                    public boolean onServerHello(Envelope envelope, byte[] body) {
+                        return false;
                     }
-                    Thread.sleep(300);
-                    second.close();
-                } catch (Exception ignored) {
-                }
-            });
-            serverThread.setDaemon(true);
-            serverThread.start();
 
-            RemoteSnapshotSink sink = sink(server.getLocalPort(), new CopyOnWriteArrayList<>());
-            sink.start();
+                    @Override
+                    public void onRejected(String reason) {
+                        // 期望：AUTH 被拒（未到 HELLO 阶段）
+                    }
+                })) {
+            bad.start();
             Thread.sleep(300);
-
-            sink.raiseRequiredRevision(KEY, 5);
-            CompletableFuture<SnapshotSink.PutResult> putDone = new CompletableFuture<>();
-            sink.putSnapshot(snapshot(5), (key, revision, result) -> putDone.complete(result));
-            assertEquals(SnapshotSink.PutResult.OK, putDone.get(8, TimeUnit.SECONDS), "断线后重连必须补发并成功");
-            serverThread.join(3000);
-            assertFalse(serverSeen.isEmpty(), "重连后必须收到补发的消息");
-            sink.close();
+            assertFalse(bad.isConnected(), "错误 secret 必须被拒（fail closed）");
         }
+        sink.close();
     }
 
+    @Test
+    void masterDisconnectReconnectReplays() throws Exception {
+        RemoteSnapshotSink sink = sink();
+        sink.raiseRequiredRevision(KEY, 5);
+        CompletableFuture<SnapshotSink.PutResult> putDone = new CompletableFuture<>();
+        sink.putSnapshot(snapshot(5), (key, revision, result) -> putDone.complete(result));
+
+        // 第一个 master：收到 INVALIDATE + PUT 并 ACK 后断开（PUT 已完成提交）
+        try (FakeMaster first = new FakeMaster(sink.port(), SECRET)) {
+            first.awaitConnected();
+            assertTrue(first.putReceived.await(5, TimeUnit.SECONDS), "第一个 master 必须收到 PUT_SNAPSHOT");
+            Thread.sleep(100);
+        }
+        // 第二个 master 重连：幂等补发 INVALIDATE；已 ACK 的 PUT 不重发
+        try (FakeMaster second = new FakeMaster(sink.port(), SECRET)) {
+            second.awaitConnected();
+            Thread.sleep(300);
+            assertEquals(SnapshotSink.PutResult.OK, putDone.get(8, TimeUnit.SECONDS),
+                    "master 重连后必须补发并成功");
+            assertEquals(List.of("INVALIDATE"), second.seen,
+                    "已 ACK 的 PUT 不重发；INVALIDATE 幂等补发");
+        }
+        sink.close();
+    }
 }

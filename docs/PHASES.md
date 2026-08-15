@@ -32,9 +32,10 @@ master 为统筹中心（玩家不能直连），slave 为 Fabric 模组后端�
 - [x] control-service 并入 master（velocity-plugin 模块承载 control 包；独立 mTLS 监听与
       证书 CN 角色绑定已删除，仅剩单端口封装通道；PeerRegistry 按 AUTH UUID 绑定
       SLAVE/SOURCE；virtual-backend 连接层已迁封装通道客户端）。
-- [ ] backend 模组（fabric-source 演化）：连接层从 mTLS 换成 velocity 授信模式（forwarding secret，
-      内网，master 主动连接）；serverName 注册；数据包缓存；事件集合不变（WORLD_EPOCH/INVALIDATE/
-      PUT_SNAPSHOT/操作终态）。
+- [x] backend 模组（fabric-source 演化）：连接层已从 mTLS 换成 velocity 授信模式（forwarding secret，
+      内网，master 主动连接源服 backend 端口；BackendControlServer/SourceConnector 两侧实现）；
+      serverName 注册（HELLO 携带，对象库分域）；数据包缓存基线规则随里程碑 5 权威桥；
+      事件集合不变（WORLD_EPOCH/INVALIDATE/PUT_SNAPSHOT/操作终态）。
 - [ ] slave Fabric 模组（新组件 slave-mod/）：原生 MC 服务器进程上接管游戏事件，只实现协议与部分
       预测，不做世界计算；256M JVM 与磁盘缓存约束落地；封装通道客户端（公共密码+UUID）。
 - [ ] Auth Gateway 归 master：slave 终止登录握手后递验证材料，master 唯一验证 + 记账
