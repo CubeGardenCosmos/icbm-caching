@@ -27,6 +27,7 @@ public final class SlaveRuntime {
     private final cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester;
     private final String brand;
     private final cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay;
+    private final cn.cubegarden.icbm.caching.slave.translate.TranslationService translationService;
 
     private SlaveRuntime(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
                          SpawnRegistry spawnRegistry, LoginVerifyGate loginVerifyGate,
@@ -35,7 +36,8 @@ public final class SlaveRuntime {
                          cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler operationHandler,
                          cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester,
                          String brand,
-                         cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay) {
+                         cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay,
+                         cn.cubegarden.icbm.caching.slave.translate.TranslationService translationService) {
         this.client = client;
         this.chunkLoader = chunkLoader;
         this.spawnRegistry = spawnRegistry;
@@ -46,6 +48,7 @@ public final class SlaveRuntime {
         this.materializeRequester = materializeRequester;
         this.brand = brand;
         this.debugOverlay = debugOverlay;
+        this.translationService = translationService;
     }
 
     public static SlaveRuntime create(SlaveControlClient client, SnapshotChunkLoader chunkLoader,
@@ -55,9 +58,10 @@ public final class SlaveRuntime {
                                       cn.cubegarden.icbm.caching.slave.operation.PlayerOperationHandler operationHandler,
                                       cn.cubegarden.icbm.caching.slave.operation.MaterializeRequester materializeRequester,
                                       String brand,
-                                      cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay) {
+                                      cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay,
+                                      cn.cubegarden.icbm.caching.slave.translate.TranslationService translationService) {
         return new SlaveRuntime(client, chunkLoader, spawnRegistry, loginVerifyGate, playerBounds, overlay,
-                operationHandler, materializeRequester, brand, debugOverlay);
+                operationHandler, materializeRequester, brand, debugOverlay, translationService);
     }
 
     public static void install(SlaveRuntime runtime) {
@@ -115,5 +119,10 @@ public final class SlaveRuntime {
     /** 调试提示 overlay（/bmtool debug toggle；未装配时为 null）。 */
     public cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay() {
         return this.debugOverlay;
+    }
+
+    /** LLM 翻译服务（/bmtool translate toggle|sign|book；未装配时为 null）。 */
+    public cn.cubegarden.icbm.caching.slave.translate.TranslationService translationService() {
+        return this.translationService;
     }
 }

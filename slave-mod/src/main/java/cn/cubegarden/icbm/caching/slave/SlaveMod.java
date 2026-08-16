@@ -145,8 +145,22 @@ public final class SlaveMod implements ModInitializer {
         cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay debugOverlay =
                 new cn.cubegarden.icbm.caching.slave.debug.SlaveDebugOverlay(client, config.uuidHex());
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(debugOverlay::onServerTick);
+        // LLM 翻译（参考 llm-translator；草稿 llm-translation §3）：聊天按接收方 locale 自动
+        // 翻译（绿色 [已翻译] 前缀）、告示牌/书本按命令翻译（绿色 Action Bar）；apiKey 空 →
+        // 服务装配但 disabled（fail closed：聊天原文直通，命令提示未启用）
+        cn.cubegarden.icbm.caching.slave.translate.LlmClient llmClient =
+                new cn.cubegarden.icbm.caching.slave.translate.LlmClient(
+                        config.llmBaseUrl(), config.llmModel(), config.llmApiKey(),
+                        config.llmSystemPrompt(), config.llmTimeoutMillis(),
+                        config.llmProxyHost(), config.llmProxyPort());
+        cn.cubegarden.icbm.caching.slave.translate.TranslationService translationService =
+                new cn.cubegarden.icbm.caching.slave.translate.TranslationService(config, llmClient);
+        // fabric-message-api CHAT_MESSAGE 在广播前触发（PlayerListMixin @Inject HEAD）；
+        // 本监听只观察不取消：原文按原版路径广播，译文异步后达
+        net.fabricmc.fabric.api.message.v1.ServerMessageEvents.CHAT_MESSAGE.register(
+                (message, sender, boundChatType) -> translationService.onChatMessage(message, sender));
         SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,
-                overlay, operationHandler, materializeRequester, config.brand(), debugOverlay);
+                overlay, operationHandler, materializeRequester, config.brand(), debugOverlay, translationService);
         SlaveRuntime.install(runtime);
         client.start();
         // 初始同步闸门：装载 spawn 区块前等基线（WORLD_EPOCH/快照）；超时不阻断（fail closed）
@@ -183,6 +197,9 @@ public final class SlaveMod implements ModInitializer {
         SlaveRuntime runtime = SlaveRuntime.current();
         if (runtime != null) {
             runtime.client().close();
+            if (runtime.translationService() != null) {
+                runtime.translationService().close();
+            }
         }
         SlaveRuntime.clear();
         LOGGER.info("[icbm-slave] 已停止");

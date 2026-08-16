@@ -23,6 +23,8 @@ dependencies {
 	testImplementation platform('org.junit:junit-bom:5.11.0')
 	testImplementation 'org.junit.jupiter:junit-jupiter'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	// LLM 翻译 JSON 构建/解析纯函数测试（运行时 com.google.gson 由 Minecraft libraries 提供）
+	testImplementation 'com.google.code.gson:gson:2.14.0'
 }
 
 processResources {

@@ -30,6 +30,9 @@ master（统筹中心：Auth Gateway + 会话记账 + 快照聚合；玩家不�
   （EMPTY 不生成 + 玩家移动边界拦截）；旁观（互动拒绝）；禁持久化；SLAVE 角色封装通道客户端
   （订阅/ACK/LOGIN_VERIFY 递交）；256M JVM 约束；F3 品牌可配置（icbm.brandLocation，
   默认 ICBM Caching Server，配置后如 ICBM Caching Server (HongKong:Kowloon)）。
+  LLM 翻译（参考 llm-translator）：聊天按接收玩家客户端 locale 自动翻译、告示牌/讲台书本按
+  `/bmtool translate sign|book` 翻译，绿色 `[已翻译]` 标记（按各 locale 本地化）；提示词/模型/
+  apiKey 集成在 slave 配置 `llm.*`；`/bmtool translate toggle` 玩家无权限手动关闭。
   `virtual-backend/` 保留为只读变体参考。
 - **`protocol/`**：跨组件共享控制协议（包络/消息编解码/对象库/封装通道层，纯 Java 25）。
 

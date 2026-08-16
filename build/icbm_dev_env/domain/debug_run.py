@@ -339,6 +339,11 @@ def _write_slave_config(identity: dict[str, str]) -> None:
         "control.heartbeatIntervalMillis=8000\n"
         "control.selfcheck=true\n"
         f"icbm.brandLocation={BRAND_LOCATION}\n"  # F3 Brand → ICBM Caching Server (icbm:lan)
+        # LLM 翻译（可选）：apiKey 为空 → 翻译功能关闭（fail closed）
+        # llm.baseUrl=https://api.deepseek.com
+        # llm.model=deepseek-chat
+        # llm.apiKey=
+        # llm.languages=zh_hk,zh_tw,en,ja,de,fr,zh_cn
     )
     try:
         os.chmod(slave_control, 0o600)

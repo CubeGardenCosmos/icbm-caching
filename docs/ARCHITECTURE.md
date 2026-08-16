@@ -72,7 +72,10 @@ slave 是独立后端服务（原生 MC 服务器进程 + Fabric 模组）。职
 - 区块数据由 committed snapshot 装载（快照 NBT → LevelChunk 注入），未命中/落后/epoch 不匹配
   → fail closed 不展示旧区块，绝不本地生成“幽灵区块”；
 - Respawn、Set Center Chunk、Unload Chunk 的客户端视图语义（vanilla 提供）；
-- 玩家交互 sequence、Acknowledge Block Change 和状态纠正（预测/回滚路径）。
+- 玩家交互 sequence、Acknowledge Block Change 和状态纠正（预测/回滚路径）；
+- LLM 翻译（可选，`llm.*` 配置）：聊天按接收玩家客户端 locale 自动翻译、告示牌/讲台书本按
+  `/bmtool translate sign|book` 翻译，绿色 `[已翻译]`（按 locale 本地化）醒目标记；apiKey 空 →
+  功能关闭（fail closed），LLM 调用在独立 daemon 线程异步执行（不阻塞 Server tick 热路径）。
 
 首版不实现游戏模拟。它只提供旁观者可见的地形、光照与方块实体快照，拒绝所有写入
 （interaction 包拒绝且不应用）。之后按操作白名单逐项开启可预测操作。

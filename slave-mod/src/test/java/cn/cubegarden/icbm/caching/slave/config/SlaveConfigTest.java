@@ -1,7 +1,9 @@
 package cn.cubegarden.icbm.caching.slave.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -56,5 +58,59 @@ class SlaveConfigTest {
         assertThrows(IllegalStateException.class, () -> load(
                 "control.masterHost=127.0.0.1\ncontrol.masterPort=11420\n"
                         + "control.uuid=1112131415161718191a1b1c1d1e1f20\ncontrol.serverName=lobby-1\n"));
+    }
+
+    @Test
+    void llmDisabledByDefaultWithoutApiKey() throws Exception {
+        SlaveConfig config = load(base());
+        assertFalse(config.translationEnabled(), "apiKey 空 → 翻译功能关闭（fail closed）");
+        assertEquals("https://api.deepseek.com", config.llmBaseUrl());
+        assertEquals("deepseek-chat", config.llmModel());
+        assertEquals(7, config.llmLanguages().size());
+        assertEquals(512, config.llmMaxTextLength());
+        assertTrue(config.llmSystemPrompt().contains("{sourceLanguage}"));
+        assertTrue(config.llmSystemPrompt().contains("{targetLanguage}"));
+    }
+
+    @Test
+    void llmEnabledWithApiKeyAndCustomSettings() throws Exception {
+        SlaveConfig config = load(base()
+                + "llm.apiKey=sk-test\n"
+                + "llm.baseUrl=https://example.com/v1\n"
+                + "llm.model=custom-model\n"
+                + "llm.timeoutMillis=30000\n"
+                + "llm.maxTextLength=256\n"
+                + "llm.languages=zh_hk,en\n"
+                + "llm.proxyHost=127.0.0.1\n"
+                + "llm.proxyPort=7890\n");
+        assertTrue(config.translationEnabled());
+        assertEquals("https://example.com/v1", config.llmBaseUrl());
+        assertEquals("custom-model", config.llmModel());
+        assertEquals(30_000, config.llmTimeoutMillis());
+        assertEquals(256, config.llmMaxTextLength());
+        assertEquals(java.util.List.of("zh_hk", "en"), config.llmLanguages());
+        assertEquals("127.0.0.1", config.llmProxyHost());
+        assertEquals(7890, config.llmProxyPort());
+    }
+
+    @Test
+    void llmCustomPromptKeepsPlaceholders() throws Exception {
+        String prompt = "翻译为 {targetLanguage}，源语言 {sourceLanguage}";
+        SlaveConfig config = load(base() + "llm.apiKey=sk-test\n"
+                + "llm.systemPrompt=" + prompt + "\n");
+        assertEquals(prompt, config.llmSystemPrompt());
+    }
+
+    @Test
+    void llmUnknownLanguageCodeFailsClosed() throws Exception {
+        // llm.languages 未知短码 → 抛异常（不静默降级）
+        assertThrows(IllegalStateException.class, () -> load(
+                base() + "llm.languages=zh_hk,xx_yy\n"));
+    }
+
+    @Test
+    void llmInvalidTimeoutFailsClosed() throws Exception {
+        assertThrows(IllegalStateException.class, () -> load(
+                base() + "llm.apiKey=sk-test\nllm.timeoutMillis=0\n"));
     }
 }

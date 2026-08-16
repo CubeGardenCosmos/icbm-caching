@@ -117,6 +117,44 @@
       （GENERATING→PUBLISHING→移除 显式状态机，超时保护不永久驻留）；slave 注入即释放不变
       （256M 约束）。
 
+### 8.4 slave LLM 翻译（参考 llm-translator）——已完成
+
+- [x] 草稿 `draft/llm-translation/` 三步流程：参考仓库（llm-translator：OpenAI 兼容
+      Chat Completions + system prompt 占位符 + 告示牌/书本 NBT 翻译）、官方
+      （ServerPlayer.clientInformation().language 客户端 locale、PlayerList 聊天广播、
+      SignBlockEntity/SignText、LecternBlockEntity/WrittenBookContent、sendSystemMessage/
+      sendOverlayMessage、Commands.LEVEL_ALL）、差异取舍（自动 per-recipient locale 翻译
+      替代手动 `t ` 前缀；绿色 [已翻译] 本地化标记；提示词进 slave 配置）。
+- [x] 语言支持表 `TranslationLanguages`：zh_hk（繁中·香港白话）/ zh_tw（繁中·台湾）/ en /
+      ja / de / fr / zh_cn 七种目标语言；MC locale 归一化（en_us→en、zh_cn、zh_hk、zh_tw、
+      ja_jp→ja、de_de→de、fr_fr→fr）；每语言含提示词名 + 本地化 [已翻译] 标记
+      （已翻譯/translated/翻訳済み/übersetzt/traduit/已翻译）。
+- [x] 基本语言判断 `LanguageJudge`（纯逻辑）：同 locale 跳过、中文变体互发跳过（基础判断
+      不细分简繁/白话）、空文本跳过、接收方 locale 不在支持表/配置跳过、脚本启发式
+      （ja 目标含假名跳过、zh 目标含 CJK 且无假名跳过；en/de/fr 拉丁不按内容跳过）。
+- [x] LLM 客户端 `LlmClient`：JDK 内置 HttpClient 异步（单线程 daemon Executor，不阻塞
+      Server tick）+ Gson（Minecraft libraries 提供，无新依赖）；system prompt 支持
+      {sourceLanguage}/{targetLanguage} 占位符；超时/非 200/响应缺内容 → LlmException
+      fail closed；可选 HTTP 代理（llm.proxyHost/Port，不自动读 HTTPS_PROXY）。
+- [x] 配置进 icbm-control.properties（`llm.*`）：baseUrl/model/apiKey/systemPrompt（提示词
+      集成在 slave 配置中，可覆盖）/timeoutMillis/maxTextLength/languages/proxyHost/Port；
+      apiKey 空 → 翻译功能关闭（fail closed）；配置文件改为 UTF-8 读取（Properties
+      load(InputStream) 按 ISO-8859-1 解码会乱码中文提示词）。
+- [x] 聊天自动翻译：fabric-message-api `ServerMessageEvents.CHAT_MESSAGE`（广播前观察，
+      不取消——原文按原版路径广播，译文异步后达）；同目标语言接收方合并为一次 LLM 调用
+      （控成本）；每玩家冷却 5s + pending 上限 2 + 输入截断（llm.maxTextLength）防滥用；
+      译文经 server.execute 回 Server thread，绿色 [已翻译] 前缀 + 白色译文系统消息送达。
+- [x] 告示牌/书本按需翻译：`/bmtool translate sign|book [x y z]`（坐标缺省 = 玩家位置）
+      读取已装载区块 SignBlockEntity（front/back 各 4 行）与 LecternBlockEntity 成书
+      （WrittenBookContent pages），一次 LLM 调用 → 绿色 Action Bar 送达；未装载/非告示牌/
+      无成书 → 明确提示（fail closed）。
+- [x] `/bmtool translate toggle` 无权限（LEVEL_ALL）：按玩家 UUID 内存开关（默认开启；
+      slave 禁持久化约束，会话级）；`bmtool` 根命令拆层——debug toggle 保持 op-only，
+      translate 子命令人人可用。
+- [x] 验证：LanguageJudgeTest（locale 归一化/场景判定/脚本启发式）、LlmClientTest（请求体/
+      响应解析/错误 fail closed）、TranslationServiceTest（toggle/冷却/截断）、SlaveConfigTest
+      （llm.* 解析/未知短码 fail closed/UTF-8 中文提示词）全绿；全组件测试通过。
+
 ### 8.3 验证与收尾（吸收原阶段 2/6/7 开放项）
 
 - [ ] 真机闭环验收：debug-run + 真实客户端——出生点周边 ≥N（如 25）区块可进入；破坏/放置经
