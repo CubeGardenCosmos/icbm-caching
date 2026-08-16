@@ -225,6 +225,24 @@ public final class SlaveControlClient implements AutoCloseable {
                 EncapsulatedChannelClient.encode(MessageType.CHUNK_MATERIALIZE_REQ, req));
     }
 
+    /** 聊天上行（阶段 9.3）：slave 玩家聊天本地不广播，RELAY 至 master → 源服权威广播。 */
+    public boolean sendChatRelay(Messages.ChatRelay relay) {
+        return this.channel.send(MessageType.CHAT_RELAY, this.requestIds.incrementAndGet(), 0,
+                EncapsulatedChannelClient.encode(MessageType.CHAT_RELAY, relay));
+    }
+
+    /** 聊天下行广播回调（阶段 9.3：源服权威广播副本送达后，翻译钩子等观察者）。 */
+    public interface ChatBroadcastListener {
+        void onChatBroadcast(net.minecraft.network.chat.PlayerChatMessage message,
+                             net.minecraft.server.level.ServerPlayer sender);
+    }
+
+    private volatile ChatBroadcastListener chatBroadcastListener;
+
+    public void setChatBroadcastListener(ChatBroadcastListener listener) {
+        this.chatBroadcastListener = listener;
+    }
+
     /** 下一条 requestId（物化/操作等请求消息用；channel 发送处自增，此处仅分配）。 */
     public long nextRequestId() {
         return this.requestIds.incrementAndGet();
@@ -376,6 +394,8 @@ public final class SlaveControlClient implements AutoCloseable {
                             EncapsulatedChannelClient.decode(MessageType.OPERATION_STATUS_RES, body));
                     case CHUNK_MATERIALIZE_RES -> SlaveControlClient.this.handleMaterializeRes(
                             EncapsulatedChannelClient.decode(MessageType.CHUNK_MATERIALIZE_RES, body));
+                    case CHAT_BROADCAST -> SlaveControlClient.this.handleChatBroadcast(
+                            EncapsulatedChannelClient.decode(MessageType.CHAT_BROADCAST, body));
                     case HEARTBEAT -> SlaveControlClient.this.ack(envelope.sequence());
                     case ERROR -> LOGGER.error("[icbm-slave] master 错误: {}",
                             EncapsulatedChannelClient.<Messages.ErrorMessage>decode(MessageType.ERROR, body).reason());
@@ -426,6 +446,40 @@ public final class SlaveControlClient implements AutoCloseable {
         } else {
             LOGGER.debug("[icbm-slave] 物化请求已受理: req={}", res.requestId());
         }
+    }
+
+    /**
+     * CHAT_BROADCAST（阶段 9.3）：源服权威广播副本下行送达——本地 broadcastChatMessage
+     * （unsigned 副本，slave 本地不再自行广播）→ 翻译钩子（接收方视角）。Server thread
+     * 执行；瞬时消息不 ACK（不推进事件水位，重连不重放旧聊天）。
+     */
+    private void handleChatBroadcast(Messages.ChatBroadcast msg) {
+        net.minecraft.server.MinecraftServer server = this.serverRef;
+        if (server == null) {
+            LOGGER.warn("[icbm-slave] 聊天下行丢弃（serverRef 未装配，fail closed）");
+            return;
+        }
+        java.util.UUID senderUuid = new java.util.UUID(
+                java.nio.ByteBuffer.wrap(msg.senderUuid()).getLong(),
+                java.nio.ByteBuffer.wrap(msg.senderUuid()).getLong(8));
+        server.execute(() -> {
+            net.minecraft.server.players.PlayerList playerList = server.getPlayerList();
+            net.minecraft.server.level.ServerPlayer sender = playerList.getPlayer(senderUuid);
+            // 权威副本送达：构造 unsigned 消息（与源服广播同一构造；v1 不保留签名链，parity）
+            net.minecraft.network.chat.PlayerChatMessage pm =
+                    net.minecraft.network.chat.PlayerChatMessage.unsigned(senderUuid, msg.message());
+            net.minecraft.network.chat.ChatType.Bound bound = net.minecraft.network.chat.ChatType.bind(
+                    net.minecraft.network.chat.ChatType.CHAT,
+                    server.registryAccess(),
+                    net.minecraft.network.chat.Component.literal(msg.senderName()));
+            playerList.broadcastChatMessage(pm, server.createCommandSourceStack(), bound);
+            LOGGER.info("[icbm-slave] 下行权威广播送达: {}: {}", msg.senderName(), msg.message());
+            // 翻译钩子（接收路径；sender 不在本地（罕见）→ 跳过翻译 fail closed）
+            ChatBroadcastListener listener = this.chatBroadcastListener;
+            if (listener != null && sender != null) {
+                listener.onChatBroadcast(pm, sender);
+            }
+        });
     }
 
     private void wakeVerify(Object res) {

@@ -231,13 +231,23 @@
       真机覆盖——RCON 无头代理无法装载未加载区块）；拒绝路径 bedrock 即时回显回归；
       全组件测试绿。
 
-### 9.3 聊天直传 master（CHAT_RELAY + 下行分发）
+### 9.3 聊天直传 master（CHAT_RELAY + 下行分发）——已完成
 
-- [ ] 草稿 `draft/chat-relay/`（secure chat 签名链差异取舍记 parity）。
-- [ ] 协议 CHAT_RELAY(0x1D)/CHAT_BROADCAST(0x1E) + codec + golden + CACHE_PROTOCOL 同一提交；
-      slave 本地不再广播，聊天上行→master→源服权威广播→下行分发所有 slave。
-- [ ] LLM 翻译迁移到接收路径（下行广播送达钩子触发；bmtool sign/book 保持 slave 本地）。
-- [ ] 验证：双 slave 互通 + 源服控制台可见；翻译生效；golden 锁定。
+- [x] 草稿 `draft/chat-relay/`：secure chat 签名链差异取舍记 parity（v1 不保留签名链，
+      源服 `PlayerChatMessage.unsigned` 广播；断线 fallback 本地广播；/say 不跨节点；
+      发送者回显经网络往返）。
+- [x] 协议 CHAT_RELAY(0x1D)/CHAT_BROADCAST(0x1E) + codec + golden + CACHE_PROTOCOL 同一提交；
+      slave 本地不再广播（fabric ALLOW_CHAT_MESSAGE 拦截，仅玩家聊天路径）→ RELAY →
+      master → 源服权威广播（`ChatType.bind(CHAT, registryAccess, name)` +
+      `broadcastChatMessage(CommandSourceStack 版)`，PlayerList.java:734）→ 下行分发所有
+      订阅 slave 本地送达（瞬时消息不进事件日志、不 ACK）。
+- [x] LLM 翻译迁移到接收路径（`TranslationService.onAuthoritativeBroadcast` 下行广播送达钩子
+      触发；发送者/冷却/合并复用；bmtool sign/book 保持 slave 本地）。
+- [x] 验证：e2e 聊天闭环（slave `icbmslave chat` 上行 → 源服控制台可见 → master 分发 →
+      slave 下行送达）；真实客户端捕获 = fabric 事件一行，双 slave 互通由 master 广播保证
+      （留 9.5 真机闭环）；golden 锁定；全组件测试绿。
+- [x] 顺带修复：e2e 操作时序竞态（warm 复操作前等恢复快照；拒绝路径位置换 chunk 避开单
+      pending 撞车）；master 操作转发发送失败显式日志 + fail closed 路由 REJECTED。
 
 ### 9.4 背包/互动直传（权威会话桥 v2：虚拟玩家）
 

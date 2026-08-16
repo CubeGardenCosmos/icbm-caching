@@ -287,7 +287,16 @@ def run_e2e() -> int:
             # 恢复目标方块（源服 setblock → 快照 → slave；0,0 warm ticket 内不卸载）
             _send_source_command(procs[0],
                     "execute in minecraft:overworld positioned 0 64 0 run setblock 0 64 0 minecraft:diamond_block")
-            _wait_log(SLAVE_LOG, "COMMITTED 就地应用", 60, "F1 就地应用 canonicalState")
+            # 等 slave 视角恢复 diamond（快照往返 + refreshLoaded；避免 warm 复操作 break 空气竞态）
+            deadline = time.monotonic() + 30
+            restored = None
+            while time.monotonic() < deadline:
+                restored = rcon.command("execute if block 0 64 0 minecraft:diamond_block")
+                if "Test passed" in restored or "Success" in restored:
+                    break
+                time.sleep(0.05)
+            if "Test passed" not in restored and "Success" not in restored:
+                raise RuntimeError(f"恢复快照未达 slave（0,64,0 非 diamond）: {restored!r}")
             # 同 chunk 第二次操作（F2 warm ticket 30s 内不再重载）：热路径 ≤200ms
             second = operate_and_measure(0, "热路径-warm", 0.2)
             print(f"  [度量] 首次 {first * 1000:.0f}ms / warm 复操作 {second * 1000:.0f}ms（9.2 验收 热≤200ms）")
@@ -299,30 +308,51 @@ def run_e2e() -> int:
             rcon.close()
 
         # 6b) 拒绝路径即时回显回归：源服造 bedrock（不可破坏）→ slave BREAK → REJECTED →
-        #     RESYNC 落回 committed（bedrock 仍展示），不产生幽灵回显
-        _send_source_command(procs[0], "execute in minecraft:overworld run forceload add 1 1")
-        _send_source_command(procs[0], "execute in minecraft:overworld positioned 1 64 1 run setblock 1 64 1 minecraft:bedrock")
+        #     RESYNC 落回 committed（bedrock 仍展示），不产生幽灵回显。位置选 17,64,1
+        #     （chunk 1,0，与 6 步操作 chunk 0,0 不同——单 pending 约束按 chunk，同 chunk
+        #     未决会拒绝）
+        _send_source_command(procs[0], "execute in minecraft:overworld run forceload add 1 0")
+        _send_source_command(procs[0], "execute in minecraft:overworld positioned 17 64 1 run setblock 17 64 1 minecraft:bedrock")
         _wait_log(SLAVE_LOG, "已装载快照", 60, "bedrock 快照到达 slave")
         rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
         try:
-            # slave 侧装载 1,1（RCON execute if block 对未装载区块读空气，无法验证）
-            result = rcon.command("forceload add 1 1")
-            print(f"  [RCON] slave forceload 1 1 → {result!r}")
-            result = rcon.command("icbmslave operate 1 64 1 break")
-            print(f"  [RCON] icbmslave operate 1 64 1 break → {result!r}")
+            # slave 侧装载 1,0（RCON execute if block 对未装载区块读空气，无法验证）
+            result = rcon.command("forceload add 1 0")
+            print(f"  [RCON] slave forceload 1 0 → {result!r}")
+            result = rcon.command("icbmslave operate 17 64 1 break")
+            print(f"  [RCON] icbmslave operate 17 64 1 break → {result!r}")
             if "已提交操作" not in result:
                 raise RuntimeError(f"slave 操作提交失败: {result!r}")
             _wait_log(SLAVE_LOG, "操作被拒", 60, "slave 拒绝终态")
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
-                verify = rcon.command("execute if block 1 64 1 minecraft:bedrock")
+                verify = rcon.command("execute if block 17 64 1 minecraft:bedrock")
                 if "Test passed" in verify or "Success" in verify:
                     break
                 time.sleep(0.05)
             print(f"  [RCON] 拒绝路径回显 bedrock → {verify!r}")
             if "Test passed" not in verify and "Success" not in verify:
-                raise RuntimeError(f"拒绝后 1,64,1 不是 bedrock（RESYNC 未回显）: {verify!r}")
+                raise RuntimeError(f"拒绝后 17,64,1 不是 bedrock（RESYNC 未回显）: {verify!r}")
             print("  [RCON] 拒绝路径即时回显（源服不可破坏裁决 → slave 落回 committed，无幽灵方块）")
+        finally:
+            rcon.close()
+
+        # 6c) 9.3 聊天直传闭环：slave RCON 模拟玩家聊天 → CHAT_RELAY → master → 源服权威
+        #     广播（控制台可见）→ CHAT_BROADCAST 下行 → slave 送达（本地不再广播，权威副本）
+        rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
+        try:
+            chat_marker = f"e2e-9.3-chat-{int(time.time())}"
+            result = rcon.command(f"icbmslave chat {chat_marker}")
+            print(f"  [RCON] icbmslave chat → {result!r}")
+            if "已上行聊天" not in result:
+                raise RuntimeError(f"slave 聊天上行失败: {result!r}")
+            # 源服控制台可见（权威广播日志）
+            _wait_log(SOURCE_LOG, f"权威聊天广播: rcon-chatter: {chat_marker}", 30, "源服控制台可见")
+            # master 分发所有 slave 日志
+            _wait_log(MASTER_LOG, f"权威聊天广播: rcon-chatter: {chat_marker}", 30, "master 分发")
+            # slave 下行送达（本地广播权威副本 + 送达日志）
+            _wait_log(SLAVE_LOG, f"下行权威广播送达: rcon-chatter: {chat_marker}", 30, "slave 下行送达")
+            print("  [RCON] 聊天直传闭环：slave 上行 → 源服权威广播（控制台可见）→ 下行分发 → slave 送达")
         finally:
             rcon.close()
 

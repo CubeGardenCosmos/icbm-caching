@@ -217,9 +217,10 @@ public final class ControlSessionLogic implements ControlSession {
             case SUBMIT_OPERATION -> this.service.onSubmitOperation(this, decodeBody(type, envelope.body()));
             case GET_OPERATION_STATUS -> this.service.onGetOperationStatus(this, decodeBody(type, envelope.body()));
             case CHUNK_MATERIALIZE_REQ -> this.service.onChunkMaterializeReq(this, decodeBody(type, envelope.body()));
+            case CHAT_RELAY -> this.service.onChatRelay(this, decodeBody(type, envelope.body()));
             case RESYNC_RES, PUT_SNAPSHOT_ACK, HELLO, HELLO_ACK, SNAPSHOT_PUSH, ERROR,
                     OPERATION_COMMITTED, OPERATION_REJECTED, OPERATION_STATUS_RES,
-                    CHUNK_MATERIALIZE_RES -> {
+                    CHUNK_MATERIALIZE_RES, CHAT_BROADCAST -> {
                 throw new ProtocolViolation("对端发送了不应由客户端发送的类型: " + type);
             }
         }

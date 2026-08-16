@@ -208,6 +208,8 @@ public final class SourceConnector implements AutoCloseable {
                     case OPERATION_STATUS_RES -> SourceConnector.this.service.onOperationStatusRes(
                             SourceConnector.this.adapter,
                             EncapsulatedChannelClient.decode(MessageType.OPERATION_STATUS_RES, body));
+                    case CHAT_BROADCAST -> SourceConnector.this.service.onChatBroadcast(
+                            EncapsulatedChannelClient.decode(MessageType.CHAT_BROADCAST, body));
                     default -> LOGGER.warn("[control] 忽略来自源服的类型: {}", type);
                 }
             } catch (Exception e) {

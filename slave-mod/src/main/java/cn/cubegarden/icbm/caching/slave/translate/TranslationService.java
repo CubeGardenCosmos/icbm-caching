@@ -82,14 +82,17 @@ public final class TranslationService {
         return this.enabledByPlayer.getOrDefault(player, true);
     }
 
-    // ===================== 聊天自动翻译（ServerMessageEvents.CHAT_MESSAGE） =====================
+    // ===================== 聊天自动翻译（下行权威广播送达钩子） =====================
 
     /**
-     * 聊天广播钩子（Server thread）：对每个非发送者玩家按接收方 locale 判定是否需要翻译，
-     * 同目标语言合并为一次 LLM 调用；译文完成后回 Server thread 以绿色 {@code [已翻译]}
-     * 前缀系统消息送达。原文广播走原版路径不变（本钩子不取消）。
+     * 聊天广播送达钩子（阶段 9.3：翻译迁移到接收路径——slave 本地聊天不再广播，改走
+     * CHAT_RELAY 上行 → master → 源服权威广播 → CHAT_BROADCAST 下行 → 本钩子；不再挂
+     * fabric CHAT_MESSAGE 事件，避免本地拦截后的事件时序错乱）。Server thread 调用：对
+     * 每个非发送者玩家按接收方 locale 判定是否需要翻译，同目标语言合并为一次 LLM 调用；
+     * 译文完成后回 Server thread 以绿色 {@code [已翻译]} 前缀系统消息送达。原文广播走
+     * 下行送达路径不变（本钩子不取消）。
      */
-    public void onChatMessage(PlayerChatMessage message, ServerPlayer sender) {
+    public void onAuthoritativeBroadcast(PlayerChatMessage message, ServerPlayer sender) {
         if (!this.config.translationEnabled()) {
             return;
         }

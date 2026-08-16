@@ -33,7 +33,9 @@ public enum MessageType {
     LOGIN_KEY_REQ(0x19),
     LOGIN_KEY_RES(0x1A),
     CHUNK_MATERIALIZE_REQ(0x1B),
-    CHUNK_MATERIALIZE_RES(0x1C);
+    CHUNK_MATERIALIZE_RES(0x1C),
+    CHAT_RELAY(0x1D),
+    CHAT_BROADCAST(0x1E);
 
     private final byte id;
 

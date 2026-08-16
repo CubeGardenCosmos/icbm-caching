@@ -38,7 +38,10 @@ public final class IcbmSlaveCommand {
                                 .then(Commands.argument("y", IntegerArgumentType.integer(-64, 320))
                                         .then(Commands.argument("z", IntegerArgumentType.integer())
                                                 .then(Commands.argument("type", StringArgumentType.word())
-                                                        .executes(IcbmSlaveCommand::operate)))))));
+                                                        .executes(IcbmSlaveCommand::operate))))))
+                .then(Commands.literal("chat")
+                        .then(Commands.argument("text", StringArgumentType.greedyString())
+                                .executes(IcbmSlaveCommand::chat))));
     }
 
     private static int operate(CommandContext<CommandSourceStack> context) {
@@ -90,6 +93,31 @@ public final class IcbmSlaveCommand {
         }
         context.getSource().sendSuccess(() -> Component.literal("已提交操作 " + java.util.HexFormat.of().formatHex(operationId)
                 + " " + typeName + " " + x + "," + y + "," + z + "（等待源服终态）"), true);
+        return 1;
+    }
+
+    /** 聊天模拟（阶段 9.3 e2e 闭环）：以模拟玩家身份发 CHAT_RELAY——真实玩家聊天由
+     *  ALLOW_CHAT_MESSAGE 拦截同路径；本命令供无头验证「slave → master → 源服权威广播 →
+     *  下行分发 → slave 送达」全链路（源服控制台可见 + slave 送达日志）。 */
+    private static int chat(CommandContext<CommandSourceStack> context) {
+        SlaveRuntime runtime = SlaveRuntime.current();
+        if (runtime == null) {
+            context.getSource().sendFailure(Component.literal("icbm-slave 运行时未初始化"));
+            return 0;
+        }
+        if (!runtime.client().connected()) {
+            context.getSource().sendFailure(Component.literal("master 未连接（聊天上行不可用）"));
+            return 0;
+        }
+        String text = StringArgumentType.getString(context, "text");
+        java.util.UUID sender = java.util.UUID.nameUUIDFromBytes("rcon-chatter".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        boolean sent = runtime.client().sendChatRelay(new Messages.ChatRelay(
+                uuidBytes(sender), "rcon-chatter", text));
+        if (!sent) {
+            context.getSource().sendFailure(Component.literal("聊天上行发送失败（fail closed）"));
+            return 0;
+        }
+        context.getSource().sendSuccess(() -> Component.literal("已上行聊天: " + text), true);
         return 1;
     }
 

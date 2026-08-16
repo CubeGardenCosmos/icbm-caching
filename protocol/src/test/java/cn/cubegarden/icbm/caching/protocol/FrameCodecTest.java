@@ -288,6 +288,37 @@ class FrameCodecTest {
     }
 
     @Test
+    void chatRelayGoldenBytes() throws IOException {
+        // 玩家 UUID 16 字节 + senderName + message（CHAT_RELAY/CHAT_BROADCAST 同一 body 布局）
+        byte[] senderUuid = new byte[16];
+        senderUuid[0] = 0x01;
+        senderUuid[15] = (byte) 0xAB;
+        Messages.ChatRelay relay = new Messages.ChatRelay(senderUuid, "alice", "你好");
+        byte[] body = encodeBody(MessageType.CHAT_RELAY, relay);
+        assertEquals(0x01, body[0] & 0xFF); // uuid 首字节（writeUuid 无长度前缀，直接 16 字节）
+        assertEquals((byte) 0xAB, body[15]); // uuid 末字节
+        assertEquals(0, body[16]); // senderName 长度前缀（5）
+        assertEquals(5, body[17]);
+        assertEquals('a', body[18]);
+        assertEquals('e', body[22]);
+        assertEquals(0, body[23]); // message 长度（6 字节 UTF-8）
+        assertEquals(6, body[24]);
+        assertEquals(0xE4, body[25] & 0xFF); // "你" UTF-8 首字节
+
+        Messages.ChatRelay decoded = (Messages.ChatRelay) decodeBody(MessageType.CHAT_RELAY, body);
+        assertArrayEquals(senderUuid, decoded.senderUuid());
+        assertEquals("alice", decoded.senderName());
+        assertEquals("你好", decoded.message());
+
+        // CHAT_BROADCAST 同一 codec 布局 round-trip
+        Messages.ChatBroadcast broadcast = new Messages.ChatBroadcast(senderUuid, "alice", "hello");
+        Messages.ChatBroadcast decodedB = (Messages.ChatBroadcast) decodeBody(
+                MessageType.CHAT_BROADCAST, encodeBody(MessageType.CHAT_BROADCAST, broadcast));
+        assertArrayEquals(senderUuid, decodedB.senderUuid());
+        assertEquals("hello", decodedB.message());
+    }
+
+    @Test
     void badMagicRejected() {
         byte[] frame = FrameCodec.encodeFrame(Envelope.of(
                 MessageType.ACK, 0, "p", 0, 1, 1, new byte[] {0, 0, 0, 0, 0, 0, 0, 0}

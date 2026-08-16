@@ -345,6 +345,22 @@ public final class Messages {
     public record GetOperationStatus(byte[] operationId) {
     }
 
+    /** CHAT_RELAY：slave 玩家聊天上行（slave 本地不广播；master 路由源服权威广播）。 */
+    public record ChatRelay(
+            byte[] senderUuid,       // 玩家 UUID（16 字节）
+            String senderName,       // 玩家名（源服无该玩家实体，广播显示名用纯文本）
+            String message           // 聊天原文（v1 不携带签名链，secure chat parity）
+    ) {
+    }
+
+    /** CHAT_BROADCAST：源服权威广播结果下行（master 分发所有订阅 slave 本地送达）。 */
+    public record ChatBroadcast(
+            byte[] senderUuid,
+            String senderName,
+            String message
+    ) {
+    }
+
     /** OPERATION_STATUS_RES：终态查询结果。 */
     public record OperationStatusRes(
             byte[] operationId,

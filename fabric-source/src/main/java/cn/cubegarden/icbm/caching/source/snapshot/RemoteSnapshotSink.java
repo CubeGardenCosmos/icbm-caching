@@ -317,7 +317,46 @@ public final class RemoteSnapshotSink implements SnapshotSink {
                 } else {
                     LOGGER.error("[icbm-source] 物化请求丢弃（运行时未装配，fail closed）");
                 }
+            } else if (type == MessageType.CHAT_RELAY) {
+                // 9.3 聊天直传：slave 玩家聊天 → 主线程以玩家身份权威广播（源服控制台/玩家
+                // 可见）→ 回传 CHAT_BROADCAST 供 master 分发所有 slave。
+                cn.cubegarden.icbm.caching.source.SourceRuntime runtime =
+                        cn.cubegarden.icbm.caching.source.SourceRuntime.current();
+                if (runtime == null) {
+                    LOGGER.error("[icbm-source] 聊天丢弃（运行时未装配，fail closed）");
+                    return;
+                }
+                net.minecraft.server.MinecraftServer server = runtime.materialize().server();
+                if (server == null) {
+                    LOGGER.warn("[icbm-source] 聊天丢弃（服务器未就绪，fail closed）");
+                    return;
+                }
+                Messages.ChatRelay relay = cn.cubegarden.icbm.caching.protocol.client
+                        .EncapsulatedChannelClient.decode(MessageType.CHAT_RELAY, body);
+                server.execute(() -> this.broadcastRelay(server, relay));
             }
+        }
+
+        /** 源服权威广播（Server thread）：unsigned 消息（v1 不保留签名链，secure chat parity）
+         *  + ChatType.bind(ChatType.CHAT, registryAccess, name)（ChatType.java:75，源服无
+         *  slave 玩家实体，用纯文本显示名）+ broadcastChatMessage(CommandSourceStack 版，
+         *  PlayerList.java:734，sender.getPlayer()=null 无副作用）；广播后回传 CHAT_BROADCAST。 */
+        private void broadcastRelay(net.minecraft.server.MinecraftServer server, Messages.ChatRelay relay) {
+            java.util.UUID senderUuid = new java.util.UUID(
+                    java.nio.ByteBuffer.wrap(relay.senderUuid()).getLong(),
+                    java.nio.ByteBuffer.wrap(relay.senderUuid()).getLong(8));
+            net.minecraft.network.chat.PlayerChatMessage pm =
+                    net.minecraft.network.chat.PlayerChatMessage.unsigned(senderUuid, relay.message());
+            net.minecraft.network.chat.ChatType.Bound bound = net.minecraft.network.chat.ChatType.bind(
+                    net.minecraft.network.chat.ChatType.CHAT,
+                    server.registryAccess(),
+                    net.minecraft.network.chat.Component.literal(relay.senderName()));
+            server.getPlayerList().broadcastChatMessage(pm, server.createCommandSourceStack(), bound);
+            RemoteSnapshotSink.this.sendOperationResult(MessageType.CHAT_BROADCAST,
+                    cn.cubegarden.icbm.caching.protocol.client.EncapsulatedChannelClient.encode(
+                            MessageType.CHAT_BROADCAST,
+                            new Messages.ChatBroadcast(relay.senderUuid(), relay.senderName(), relay.message())));
+            LOGGER.info("[icbm-source] 权威聊天广播: {}: {}", relay.senderName(), relay.message());
         }
 
         @Override

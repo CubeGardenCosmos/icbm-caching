@@ -249,6 +249,28 @@ RES(accepted=false, reason="source-unavailable")（fail closed，slave 保持撞
 PLAYER_PROXIMITY 每 tick 限量、周期预取（PREFETCH）。源服每 tick 限量 addTicket（默认 8），
 防快速移动引发生成风暴阻塞源服主线程。
 
+### CHAT_RELAY / CHAT_BROADCAST（阶段 9.3 新增，聊天直传 master）
+
+slave 玩家聊天**本地不再广播**（fabric ALLOW_CHAT_MESSAGE 拦截，仅玩家聊天路径；/say 命令
+广播不受影响，parity：不跨节点）：上行 → master → 源服权威广播（源服控制台/玩家可见）→
+广播结果下行分发所有订阅 slave 本地送达。聊天是瞬时消息：**不进事件日志**（断线不重放旧
+聊天），slave 侧不 ACK（不推进事件水位）。
+
+    CHAT_RELAY(0x1D)      slave → master → source
+        senderUuid(16 字节) / senderName(2+utf8) / message(2+utf8)
+
+    CHAT_BROADCAST(0x1E)  source → master → 所有订阅 slave
+        senderUuid(16 字节) / senderName(2+utf8) / message(2+utf8)
+
+路由与失败语义：master 校验 slave 角色后转发源服（SourceConnector）；源服未连接 → 丢弃并
+记日志（fail closed，聊天不可用；slave 侧 master 未连接时 ALLOW 返回 true 本地广播 fallback）。
+源服广播：主线程 `PlayerChatMessage.unsigned(senderUuid, message)` + `ChatType.bind(ChatType.CHAT,
+registryAccess, Component.literal(senderName))`（ChatType.java:75，源服无 slave 玩家实体，用纯
+文本显示名）+ `PlayerList.broadcastChatMessage(msg, createCommandSourceStack(), bound)`
+（PlayerList.java:734，sender.getPlayer()=null 无副作用）。**secure chat 签名链 v1 不保留**：
+RELAY 只传原文/UUID/名字，源服以 unsigned 广播（客户端按未签名样式渲染；enforceSecureProfile
+开启时不可用，源服默认 false）——差异记入 parity（草稿 draft/chat-relay）。
+
 ## 4. 管理与复制（阶段2 新增）
 
 ### ADMIN_INVALIDATE

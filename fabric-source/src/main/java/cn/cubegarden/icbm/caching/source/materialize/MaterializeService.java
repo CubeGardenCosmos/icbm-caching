@@ -144,6 +144,11 @@ public final class MaterializeService {
         });
     }
 
+    /** 最近主线程服务器引用（通道线程入口用；null = 服务器未就绪）。 */
+    public MinecraftServer server() {
+        return this.lastServer;
+    }
+
     /** 每 tick 末推进状态机（ServerTickEvents.END_SERVER_TICK，ticker 之后调用）。 */
     public void onEndServerTick(MinecraftServer server) {
         this.lastServer = server;

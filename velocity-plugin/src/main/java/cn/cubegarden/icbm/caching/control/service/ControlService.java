@@ -190,7 +190,12 @@ public final class ControlService implements AutoCloseable {
                     msg.dimension(), posToChunk(msg.posX(), msg.posZ()));
             return;
         }
-        source.send(MessageType.SUBMIT_OPERATION, 0, encodeBody(MessageType.SUBMIT_OPERATION, msg));
+        if (!source.send(MessageType.SUBMIT_OPERATION, 0, encodeBody(MessageType.SUBMIT_OPERATION, msg))) {
+            LOGGER.error("[control] 操作转发源服发送失败（fail closed）: op={} type={}",
+                    hex(msg.operationId()), msg.operationType());
+            this.routeRejected(session, msg.operationId(), "source-send-failed",
+                    msg.dimension(), posToChunk(msg.posX(), msg.posZ()));
+        }
     }
 
     /** GET_OPERATION_STATUS：slave 超时查询 → 转发源服终态历史。 */
@@ -227,6 +232,37 @@ public final class ControlService implements AutoCloseable {
     public void onOperationStatusRes(ControlSession session, Messages.OperationStatusRes msg) {
         session.requireRole(Role.SOURCE);
         this.routeToOrigin(msg.operationId(), MessageType.OPERATION_STATUS_RES, msg);
+    }
+
+    // ---- 聊天直传（阶段 9.3；聊天瞬时消息不进事件日志，断线不重放） ----
+
+    /** CHAT_RELAY：slave 玩家聊天上行 → 转发源服权威广播（源服唯一权威）。 */
+    public void onChatRelay(ControlSession session, Messages.ChatRelay msg) {
+        session.requireSlaveRole();
+        cn.cubegarden.icbm.caching.control.net.SourceConnector source = this.sourceConnector;
+        if (source == null || !source.connected()) {
+            LOGGER.warn("[control] 聊天拒绝（源服未连接，fail closed）: {}: {}",
+                    msg.senderName(), msg.message());
+            return;
+        }
+        source.send(MessageType.CHAT_RELAY, 0, encodeBody(MessageType.CHAT_RELAY, msg));
+    }
+
+    /** CHAT_BROADCAST：源服权威广播结果 → 分发所有订阅 slave 本地送达（不区分维度）。
+     *  由 SourceConnector.onMessage 调用（该通道仅源服消息，无需角色再校验）。 */
+    public void onChatBroadcast(Messages.ChatBroadcast msg) {
+        byte[] body = encodeBody(MessageType.CHAT_BROADCAST, msg);
+        int delivered = 0;
+        for (cn.cubegarden.icbm.caching.control.replication.Replicator.SlaveSubscription sub
+                : this.replicator.subscriptions().values()) {
+            cn.cubegarden.icbm.caching.control.net.ControlSession slave = sub.session();
+            if (!slave.isActive()) {
+                continue;
+            }
+            slave.send(MessageType.CHAT_BROADCAST, 0, body);
+            delivered++;
+        }
+        LOGGER.info("[control] 权威聊天广播: {}: {}（slave 送达 {}）", msg.senderName(), msg.message(), delivered);
     }
 
     private void routeToOrigin(byte[] operationId, MessageType type, Object msg) {

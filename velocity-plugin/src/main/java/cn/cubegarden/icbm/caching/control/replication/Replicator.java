@@ -41,6 +41,11 @@ public final class Replicator {
          *  断开由调用方处理——fail closed，不静默丢事件）。 */
         static final int PENDING_LIMIT = 4096;
         final ControlSession session;
+
+        /** 订阅会话（服务层广播聊天下行用；ControlSession 接口发送）。 */
+        public ControlSession session() {
+            return this.session;
+        }
         final Set<DimensionRef> dimensions;
         volatile long ackedSequence;
         volatile long lastReceivedSequence;

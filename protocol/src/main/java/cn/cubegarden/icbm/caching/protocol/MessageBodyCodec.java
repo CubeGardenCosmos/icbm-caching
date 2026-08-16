@@ -507,6 +507,32 @@ public final class MessageBodyCodec {
                 return new Messages.ChunkMaterializeRes(in.readLong(), in.readBoolean(), readString(in));
             }
         });
+        register(MessageType.CHAT_RELAY, new Codec<Messages.ChatRelay>() {
+            @Override
+            public void encode(DataOutput out, Messages.ChatRelay value) throws IOException {
+                writeUuid(out, value.senderUuid());
+                writeString(out, value.senderName());
+                writeString(out, value.message());
+            }
+
+            @Override
+            public Messages.ChatRelay decode(DataInput in) throws IOException {
+                return new Messages.ChatRelay(readUuid(in), readString(in), readString(in));
+            }
+        });
+        register(MessageType.CHAT_BROADCAST, new Codec<Messages.ChatBroadcast>() {
+            @Override
+            public void encode(DataOutput out, Messages.ChatBroadcast value) throws IOException {
+                writeUuid(out, value.senderUuid());
+                writeString(out, value.senderName());
+                writeString(out, value.message());
+            }
+
+            @Override
+            public Messages.ChatBroadcast decode(DataInput in) throws IOException {
+                return new Messages.ChatBroadcast(readUuid(in), readString(in), readString(in));
+            }
+        });
         register(MessageType.OPERATION_COMMITTED, new Codec<Messages.OperationCommitted>() {
             @Override
             public void encode(DataOutput out, Messages.OperationCommitted value) throws IOException {

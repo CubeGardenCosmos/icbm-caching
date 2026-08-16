@@ -164,10 +164,29 @@ public final class SlaveMod implements ModInitializer {
                         config.llmProxyHost(), config.llmProxyPort());
         cn.cubegarden.icbm.caching.slave.translate.TranslationService translationService =
                 new cn.cubegarden.icbm.caching.slave.translate.TranslationService(config, llmClient);
-        // fabric-message-api CHAT_MESSAGE 在广播前触发（PlayerListMixin @Inject HEAD）；
-        // 本监听只观察不取消：原文按原版路径广播，译文异步后达
-        net.fabricmc.fabric.api.message.v1.ServerMessageEvents.CHAT_MESSAGE.register(
-                (message, sender, boundChatType) -> translationService.onChatMessage(message, sender));
+        // 阶段 9.3 聊天直传：本地不再广播，聊天上行 → master → 源服权威广播 → 下行分发。
+        // ALLOW_CHAT_MESSAGE（fabric-message-api PlayerListMixin @Inject ServerPlayer 版
+        // broadcastChatMessage）只覆盖玩家聊天；/say（CommandSourceStack 版）走 COMMAND_MESSAGE
+        // 不受影响（parity：/say 不跨节点）。master 未连接 → 返回 true（本地广播 fallback）。
+        net.fabricmc.fabric.api.message.v1.ServerMessageEvents.ALLOW_CHAT_MESSAGE.register(
+                (message, sender, boundChatType) -> {
+                    if (!client.connected()) {
+                        return true; // master 不可达：本地广播 fallback（聊天非世界基线）
+                    }
+                    java.util.UUID uuid = sender.getUUID();
+                    java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(16);
+                    buffer.putLong(uuid.getMostSignificantBits());
+                    buffer.putLong(uuid.getLeastSignificantBits());
+                    boolean sent = client.sendChatRelay(new cn.cubegarden.icbm.caching.protocol.Messages.ChatRelay(
+                            buffer.array(), sender.getGameProfile().name(), message.signedContent()));
+                    if (!sent) {
+                        LOGGER.warn("[icbm-slave] 聊天上行发送失败（本地不广播，fail closed）");
+                    }
+                    return false; // 取消本地广播（权威广播经下行送达）
+                });
+        // 翻译迁移到接收路径：下行权威广播送达钩子触发（不再挂 CHAT_MESSAGE，避免本地拦截后
+        // 事件时序错乱）；发送者/冷却/合并逻辑复用；bmtool sign/book 保持 slave 本地命令路径。
+        client.setChatBroadcastListener(translationService::onAuthoritativeBroadcast);
         SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,
                 overlay, operationHandler, materializeRequester, config.brand(), debugOverlay, translationService);
         SlaveRuntime.install(runtime);
