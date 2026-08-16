@@ -11,7 +11,11 @@
     "SpectateGateMixin",
     "SaveGateMixin",
     "ChunkMapMixin",
-    "ChunkMapAccess"
+    "ChunkMapAccess",
+    "LevelTicksWorldSimMixin",
+    "LevelWorldSimMixin",
+    "ServerLevelWorldSimMixin",
+    "MobDespawnWorldSimMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -190,16 +190,28 @@
 聊天、背包等内容直传 master；破坏方块以 master→源服裁决为权威（快路径化）；红石等世界演化
 不归 slave。
 
-### 9.1 边缘世界计算禁用（红石不归 slave）
+### 9.1 边缘世界计算禁用（红石不归 slave）——已完成
 
-- [ ] 草稿 `draft/edge-no-world-sim/` 三步流程（官方 ServerLevel.tick/tickChunk/NaturalSpawner/
-      计划刻路径，类名以 minecraft-assets 核对）。
-- [ ] gamerule 兜底：doRandomTick/doMobSpawning/doDaylightCycle/doWeatherCycle=false。
-- [ ] Mixin 禁用不可由 gamerule 覆盖的路径：计划刻/红石、流体 tick、方块实体 tick、非玩家实体
-      tick（只保留 ServerPlayer）、生物生成（NaturalSpawner）。
-- [ ] 时间处理决策（冻结 v1 / 源服周期同步）记录 parity。
-- [ ] MixinTargetVerifier 扩展 tick 目标自检（fail closed）。
-- [ ] 验证：红石不 tick、作物不生长、无生物生成、玩家移动/视角正常；全组件测试绿。
+- [x] 草稿 `draft/edge-no-world-sim/` 三步流程（参考仓库无现成参考 → 官方 ServerLevel.tick/
+      tickChunk/tickChunks/NaturalSpawner/计划刻路径逐行核对，类名行号以 minecraft-assets
+      为准；差异取舍：gamerule 兜底 + Mixin 禁 gamerule 不可覆盖路径；tickChunk/NaturalSpawner
+      由 gamerule 短路无需 Mixin；否决全局 freeze 方案——purgeStaleTickets/chunkMap.tick
+      随之停摆导致区块永不卸载）。
+- [x] gamerule 兜底（26.3 命名与 1.21 完全不同，GameRules.java 核对）：random_tick_speed=0 /
+      spawn_mobs=false / advance_time=false / advance_weather=false / raids=false——代码强制
+      （WorldSimGate.apply，非配置项）+ 读回自检（WorldSimGate.verify，fail closed）。
+- [x] Mixin 禁用不可由 gamerule 覆盖的路径：LevelTicks.tick（计划刻/红石 + 流体计划刻）、
+      Level.tickBlockEntities（方块实体 tick）、ServerLevel.runBlockEvents（方块事件）、
+      ServerLevel.tickThunder（闪电）、ServerLevel.tickTime（时间冻结 v1）、
+      tickNonPassenger/tickPassenger（非玩家实体 tick 只保留 ServerPlayer）、
+      Mob.checkDespawn（生物凭空消失）。
+- [x] 时间处理决策：冻结 v1（tickTime cancel，gameTime/昼夜恒定），parity 记录
+      （源服周期同步 worldTime 为后续优化，9.5 定稿）。
+- [x] MixinTargetVerifier 扩展 tick 目标自检（ServerLevel.tick/tickTime/runBlockEvents/
+      tickThunder/tickNonPassenger/tickPassenger、ServerChunkCache.tick、LevelTicks.tick、
+      Level.tickBlockEntities、Mob.checkDespawn、GameRules 类，fail closed）。
+- [x] 验证：WorldSimGateTest（GameRules 常量反射自检，防 26.3 常量漂移）+ slave-mod 全测试绿。
+      红石不 tick/作物不生长/无生物生成/玩家移动视角正常的真机验证并入 9.5 闭环。
 
 ### 9.2 破坏快速同步（master 权威快路径）
 

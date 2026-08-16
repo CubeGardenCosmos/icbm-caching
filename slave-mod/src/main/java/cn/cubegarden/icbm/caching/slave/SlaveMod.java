@@ -9,6 +9,7 @@ import cn.cubegarden.icbm.caching.slave.network.LoginVerifyGate;
 import cn.cubegarden.icbm.caching.slave.network.PlayerBounds;
 import cn.cubegarden.icbm.caching.slave.revision.ModpackFingerprint;
 import cn.cubegarden.icbm.caching.slave.selfcheck.MixinTargetVerifier;
+import cn.cubegarden.icbm.caching.slave.selfcheck.WorldSimGate;
 import cn.cubegarden.icbm.caching.slave.world.SnapshotChunkLoader;
 import cn.cubegarden.icbm.caching.slave.world.SpawnRegistry;
 import net.fabricmc.api.ModInitializer;
@@ -69,6 +70,14 @@ public final class SlaveMod implements ModInitializer {
     private void setup(MinecraftServer server) {
         if (!MixinTargetVerifier.verify()) {
             LOGGER.error("[icbm-slave] Mixin 目标自检失败（fail closed：slave 控制通道不启动，玩家登录被拒）");
+            return;
+        }
+        // 阶段 9.1 边缘世界计算禁用：gamerule 兜底（random_tick_speed=0/spawn_mobs=false/
+        // advance_time=false/advance_weather=false/raids=false，26.3 命名见 GameRules.java）
+        // + 读回自检；未生效 → fail closed（不启动控制通道，与 Mixin 自检同路径）
+        WorldSimGate.apply(server);
+        if (!WorldSimGate.verify(server)) {
+            LOGGER.error("[icbm-slave] 世界计算 gamerule 自检失败（fail closed：slave 控制通道不启动）");
             return;
         }
         SlaveConfig config = SlaveConfig.load(server.getWorldPath(LevelResource.ROOT));

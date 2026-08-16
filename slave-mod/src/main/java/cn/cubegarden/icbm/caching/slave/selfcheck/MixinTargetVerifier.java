@@ -34,7 +34,19 @@ public final class MixinTargetVerifier {
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleUseItem")
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleInteract")
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "ackBlockChangesUpTo")
-                && checkMethod("net.minecraft.server.MinecraftServer", "getServerModName");
+                && checkMethod("net.minecraft.server.MinecraftServer", "getServerModName")
+                // 阶段 9.1 边缘世界计算禁用（WorldSim mixins）目标
+                && checkMethod("net.minecraft.server.level.ServerLevel", "tick")
+                && checkMethod("net.minecraft.server.level.ServerLevel", "tickTime")
+                && checkMethod("net.minecraft.server.level.ServerLevel", "runBlockEvents")
+                && checkMethod("net.minecraft.server.level.ServerLevel", "tickThunder")
+                && checkMethod("net.minecraft.server.level.ServerLevel", "tickNonPassenger")
+                && checkMethod("net.minecraft.server.level.ServerLevel", "tickPassenger")
+                && checkMethod("net.minecraft.server.level.ServerChunkCache", "tick")
+                && checkMethod("net.minecraft.world.ticks.LevelTicks", "tick")
+                && checkMethod("net.minecraft.world.level.Level", "tickBlockEntities")
+                && checkMethod("net.minecraft.world.entity.Mob", "checkDespawn")
+                && checkClass("net.minecraft.world.level.gamerules.GameRules");
         long maxMemory = Runtime.getRuntime().maxMemory();
         if (maxMemory > 256L * 1024 * 1024) {
             LOGGER.warn("[icbm-slave] 堆上限 {} MiB 超过 256M 设计约束（观测/压测环境可接受）",
