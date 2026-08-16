@@ -96,7 +96,7 @@ public final class ControlServiceMain {
 
         SourceConnector sourceConnector = null;
         if (config.backend() != null) {
-            sourceConnector = new SourceConnector(config, service, replicator, registry);
+            sourceConnector = new SourceConnector(config, service, replicator, registry, backendHealth);
             sourceConnector.start();
             bridge.attachSourceConnector(sourceConnector);
         }

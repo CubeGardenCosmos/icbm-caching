@@ -206,7 +206,7 @@ public final class IcbmSource implements ModInitializer {
         String registryFingerprint = registryFingerprint(server);
         try {
             RemoteSnapshotSink sink = new RemoteSnapshotSink(
-                    bindHost, bindPort, forwardingSecret, sourceServerId, serverName,
+                    server, bindHost, bindPort, forwardingSecret, sourceServerId, serverName,
                     net.minecraft.SharedConstants.getCurrentVersion().name(),
                     net.minecraft.SharedConstants.getProtocolVersion(),
                     net.fabricmc.loader.api.FabricLoader.getInstance()

@@ -105,7 +105,7 @@ class McPassthroughBridgeTest {
                 Map.of(SLAVE_UUID, "SLAVE"),
                 new ServiceConfig.BackendServer("127.0.0.1", this.backend.port(), TestBackendServer.SECRET),
                 16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
-        this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry);
+        this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry, new cn.cubegarden.icbm.caching.control.routing.BackendHealth());
         this.sourceConnector.start();
         this.bridge.attachSourceConnector(this.sourceConnector);
         assertTrue(this.backend.helloAcked.await(5, TimeUnit.SECONDS), "源服必须注册: " + this.backend.events);
@@ -139,16 +139,17 @@ class McPassthroughBridgeTest {
     }
 
     /** MC_PASSTHROUGH body：头 8 字节流序号 + 4 字节长度 + 明文报文。 */
+    /** body v2 = [playerUuid(16)][流序号(8)][长度(4)][报文]（CACHE_PROTOCOL §10 v2）。 */
     private static byte[] mcBody(long streamSequence, byte[] packet) {
-        byte[] body = new byte[12 + packet.length];
-        for (int i = 0; i < 8; i++) {
-            body[i] = (byte) (streamSequence >>> (56 - i * 8));
-        }
-        body[8] = (byte) (packet.length >>> 24);
-        body[9] = (byte) (packet.length >>> 16);
-        body[10] = (byte) (packet.length >>> 8);
-        body[11] = (byte) packet.length;
-        System.arraycopy(packet, 0, body, 12, packet.length);
+        byte[] body = new byte[28 + packet.length];
+        java.util.UUID playerUuid = java.util.UUID.nameUUIDFromBytes(
+                "rcon-player".getBytes(StandardCharsets.UTF_8));
+        java.nio.ByteBuffer.wrap(body)
+                .putLong(0, playerUuid.getMostSignificantBits())
+                .putLong(8, playerUuid.getLeastSignificantBits())
+                .putLong(16, streamSequence)
+                .putInt(24, packet.length);
+        System.arraycopy(packet, 0, body, 28, packet.length);
         return body;
     }
 

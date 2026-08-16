@@ -59,11 +59,13 @@ public final class RemoteSnapshotSink implements SnapshotSink {
     private volatile BackendControlSession session;
     private volatile boolean connected;
     private volatile boolean closed;
+    private final cn.cubegarden.icbm.caching.source.virtual.VirtualPlayerRegistry virtualPlayers;
 
     private record PendingPut(ChunkSnapshot snapshot, PutCallback done) {
     }
 
     public RemoteSnapshotSink(
+            net.minecraft.server.MinecraftServer server,
             String bindHost,
             int bindPort,
             String forwardingSecret,
@@ -82,6 +84,7 @@ public final class RemoteSnapshotSink implements SnapshotSink {
                 registryAndDatapackFingerprint);
         this.server = new BackendControlServer(bindHost, bindPort, forwardingSecret, helloConfig,
                 new ConnectionListener());
+        this.virtualPlayers = new cn.cubegarden.icbm.caching.source.virtual.VirtualPlayerRegistry(server);
         this.outboxThread = new Thread(this::outboxLoop, "icbm-source-outbox");
         this.outboxThread.setDaemon(true);
     }
@@ -148,6 +151,7 @@ public final class RemoteSnapshotSink implements SnapshotSink {
     @Override
     public void close() {
         this.closed = true;
+        this.virtualPlayers.closeAll();
         this.server.close();
         BackendControlSession s = this.session;
         if (s != null) {
@@ -362,8 +366,18 @@ public final class RemoteSnapshotSink implements SnapshotSink {
         @Override
         public void onDisconnected(Throwable cause) {
             RemoteSnapshotSink.this.connected = false;
+            // 9.4 权威会话：backend 断线 → 全部虚拟玩家会话销毁（fail closed）
+            RemoteSnapshotSink.this.virtualPlayers.closeAll();
             LOGGER.warn("[icbm-source] backend 断开（outbox 保留重发）: {}",
                     cause == null ? "?" : cause.getMessage());
+        }
+
+        @Override
+        public void onMcPassthrough(byte[] body) {
+            // 9.4 权威会话 v2：slave 明文 MC 报文 → 虚拟玩家会话注入（vanilla 全权处理）；
+            // body v2 = [playerUuid(16)][流序号(8)][长度(4)][报文]（CACHE_PROTOCOL §10）
+            RemoteSnapshotSink.this.virtualPlayers.onMcPassthrough(
+                    RemoteSnapshotSink.this.session, body);
         }
     }
 

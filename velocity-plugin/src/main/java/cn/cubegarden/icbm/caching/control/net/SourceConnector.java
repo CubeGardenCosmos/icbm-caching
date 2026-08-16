@@ -42,11 +42,14 @@ public final class SourceConnector implements AutoCloseable {
     private final Replicator replicator;
     private final EncapsulatedChannelClient client;
     private final BackendSessionAdapter adapter;
+    private final cn.cubegarden.icbm.caching.control.routing.BackendHealth backendHealth;
     private volatile cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge bridge;
 
     public SourceConnector(ServiceConfig config, ControlService service,
-                           Replicator replicator, PeerRegistry registry) {
+                           Replicator replicator, PeerRegistry registry,
+                           cn.cubegarden.icbm.caching.control.routing.BackendHealth backendHealth) {
         this.config = config;
+        this.backendHealth = backendHealth;
         this.backend = config.backend();
         if (this.backend == null) {
             throw new IllegalArgumentException("未配置 control.backend*，无法启动 SourceConnector");
@@ -164,6 +167,7 @@ public final class SourceConnector implements AutoCloseable {
 
         @Override
         public void onConnected(String serverId) {
+            SourceConnector.this.backendHealth.markConnected(System.currentTimeMillis());
             LOGGER.info("[control] 源服 backend 已连接: {}", serverId);
         }
 
@@ -175,6 +179,7 @@ public final class SourceConnector implements AutoCloseable {
 
         @Override
         public void onMessage(MessageType type, Envelope envelope, byte[] body) {
+            SourceConnector.this.backendHealth.markActivity(System.currentTimeMillis());
             SourceConnector.this.adapter.onEnvelope(envelope);
             try {
                 switch (type) {
@@ -229,7 +234,12 @@ public final class SourceConnector implements AutoCloseable {
 
         @Override
         public void onDisconnected(Throwable cause) {
+            SourceConnector.this.backendHealth.markDisconnected();
             SourceConnector.this.registry.unregister(SourceConnector.this.adapter.sourceServerId());
+            cn.cubegarden.icbm.caching.control.bridge.McPassthroughBridge bridge = SourceConnector.this.bridge;
+            if (bridge != null) {
+                bridge.onSourceDisconnected();
+            }
             LOGGER.warn("[control] 源服 backend 断开（重连）: {}", cause == null ? "?" : cause.getMessage());
         }
     }

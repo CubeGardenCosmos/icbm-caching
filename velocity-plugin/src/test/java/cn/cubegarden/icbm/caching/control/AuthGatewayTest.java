@@ -118,7 +118,7 @@ class AuthGatewayTest {
                 Map.of(SLAVE_UUID, "SLAVE"),
                 new ServiceConfig.BackendServer("127.0.0.1", this.backend.port(), TestBackendServer.SECRET),
                 16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
-        this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry);
+        this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry, new cn.cubegarden.icbm.caching.control.routing.BackendHealth());
         this.sourceConnector.start();
         this.bridge.attachSourceConnector(this.sourceConnector);
         assertTrue(this.backend.helloAcked.await(5, TimeUnit.SECONDS), "源服必须注册: " + this.backend.events);

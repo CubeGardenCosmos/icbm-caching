@@ -41,7 +41,14 @@ public final class IcbmSlaveCommand {
                                                         .executes(IcbmSlaveCommand::operate))))))
                 .then(Commands.literal("chat")
                         .then(Commands.argument("text", StringArgumentType.greedyString())
-                                .executes(IcbmSlaveCommand::chat))));
+                                .executes(IcbmSlaveCommand::chat)))
+                .then(Commands.literal("passthrough")
+                        .then(Commands.literal("useitem")
+                                .then(Commands.argument("x", IntegerArgumentType.integer())
+                                        .then(Commands.argument("y", IntegerArgumentType.integer(-64, 320))
+                                                .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                        .then(Commands.argument("dir", StringArgumentType.word())
+                                                                .executes(IcbmSlaveCommand::passthroughUseItem))))))));
     }
 
     private static int operate(CommandContext<CommandSourceStack> context) {
@@ -128,4 +135,59 @@ public final class IcbmSlaveCommand {
         buffer.putLong(uuid.getLeastSignificantBits());
         return bytes;
     }
+
+    /** 权威会话 v2 调试：{@code /icbmslave passthrough useitem <x> <y> <z> <dir>} —— 构造
+     *  ServerboundUseItemOnPacket（主手，点击 (x,y,z) + 方向）走与真实玩家拦截相同的上行路径
+     *  （MC_PASSTHROUGH → master → 源服虚拟玩家 vanilla 处理）。e2e 无头验证「使用物品
+     *  结果来自源服」：源服 give 虚拟玩家方块 → 此命令放置 → 快照 → slave 视角。
+     *
+     *  <p>dir = up|down|north|south|east|west（放置方向）；序列=0（无头）。
+     */
+    private static int passthroughUseItem(CommandContext<CommandSourceStack> context) {
+        SlaveRuntime runtime = SlaveRuntime.current();
+        if (runtime == null) {
+            context.getSource().sendFailure(Component.literal("icbm-slave 运行时未初始化"));
+            return 0;
+        }
+        if (!runtime.client().connected()) {
+            context.getSource().sendFailure(Component.literal("master 未连接（fail closed，拒绝直传）"));
+            return 0;
+        }
+        int x = IntegerArgumentType.getInteger(context, "x");
+        int y = IntegerArgumentType.getInteger(context, "y");
+        int z = IntegerArgumentType.getInteger(context, "z");
+        String dirName = StringArgumentType.getString(context, "dir").toLowerCase(Locale.ROOT);
+        net.minecraft.core.Direction dir = switch (dirName) {
+            case "up" -> net.minecraft.core.Direction.UP;
+            case "down" -> net.minecraft.core.Direction.DOWN;
+            case "north" -> net.minecraft.core.Direction.NORTH;
+            case "south" -> net.minecraft.core.Direction.SOUTH;
+            case "east" -> net.minecraft.core.Direction.EAST;
+            case "west" -> net.minecraft.core.Direction.WEST;
+            default -> {
+                context.getSource().sendFailure(Component.literal("未知方向: " + dirName + "（up|down|north|south|east|west）"));
+                yield null;
+            }
+        };
+        if (dir == null) {
+            return 0;
+        }
+        net.minecraft.core.BlockPos clicked = new net.minecraft.core.BlockPos(x, y, z);
+        net.minecraft.world.phys.BlockHitResult hit = new net.minecraft.world.phys.BlockHitResult(
+                net.minecraft.world.phys.Vec3.atCenterOf(clicked), dir, clicked, false);
+        net.minecraft.network.protocol.game.ServerboundUseItemOnPacket packet =
+                new net.minecraft.network.protocol.game.ServerboundUseItemOnPacket(
+                        net.minecraft.world.InteractionHand.MAIN_HAND, hit, 0);
+        UUID playerUuid = UUID.nameUUIDFromBytes("rcon-player".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        boolean sent = runtime.passthrough().sendServerbound(playerUuid, packet);
+        if (!sent) {
+            context.getSource().sendFailure(Component.literal("直传上行失败（fail closed）"));
+            return 0;
+        }
+        context.getSource().sendSuccess(
+                () -> Component.literal("已直传 use-item: 点击 " + x + "," + y + "," + z + " 方向 " + dirName),
+                true);
+        return 1;
+    }
+
 }

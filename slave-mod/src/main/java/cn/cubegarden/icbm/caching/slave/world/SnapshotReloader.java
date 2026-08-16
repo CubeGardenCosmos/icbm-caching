@@ -2,6 +2,7 @@ package cn.cubegarden.icbm.caching.slave.world;
 
 import cn.cubegarden.icbm.caching.protocol.DimensionRef;
 import cn.cubegarden.icbm.caching.slave.operation.OperationOverlay;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.core.registries.Registries;
@@ -51,6 +52,10 @@ public final class SnapshotReloader {
     private final Set<Long> pendingCheck = ConcurrentHashMap.newKeySet();
     /** 操作 REJECTED 的 RESYNC pos（终态回调登记；Server tick 就地刷新 + 重应用预测）。 */
     private final Set<Long> pendingResync = ConcurrentHashMap.newKeySet();
+    /** 已就地应用的对象库 revision（防旧 rev 快照覆盖新状态后不再刷新：9.4 e2e 暴露——物化
+     *  洪水下 rev=2 在裁决后到达 → 刷新旧 diamond 覆盖 F1 air → pendingCheck 去重不再刷新；
+     *  记录 appliedRev，仅对象库新 rev 触发重新刷新）。 */
+    private final Map<Long, Long> appliedRevisions = new ConcurrentHashMap<>();
 
     /** 新快照装载成功回调（SlaveControlClient 线程）：登记待检查（实际刷新在主线程 tick）。
      *  已在刷新流程中的 pos 忽略（重复快照不叠加——重载时对象库已是最新，直接命中）。 */
@@ -58,6 +63,11 @@ public final class SnapshotReloader {
         long key = ChunkPos.pack(chunkX, chunkZ);
         if (this.pendingResync.contains(key)) {
             return;
+        }
+        long committed = this.loader.committedRevision(chunkX, chunkZ);
+        Long applied = this.appliedRevisions.get(key);
+        if (applied != null && committed <= applied) {
+            return; // 已应用同/更新 rev（陈旧或重复快照不重复刷新）
         }
         this.pendingCheck.add(key);
     }
@@ -82,6 +92,9 @@ public final class SnapshotReloader {
                 int cx = ChunkPos.getX(key);
                 int cz = ChunkPos.getZ(key);
                 boolean applied = this.loader.refreshLoaded(level, new ChunkPos(cx, cz));
+                if (applied) {
+                    this.appliedRevisions.put(key, this.loader.committedRevision(cx, cz));
+                }
                 this.applyOverlayToChunk(level, cx, cz);
                 LOGGER.debug("[icbm-slave] 区块 RESYNC（操作被拒，落回 committed + 重应用预测）: {},{} applied={}",
                         cx, cz, applied);
@@ -96,6 +109,10 @@ public final class SnapshotReloader {
                 int cz = ChunkPos.getZ(key);
                 if (level.getChunkSource().getChunkNow(cx, cz) != null) {
                     boolean applied = this.loader.refreshLoaded(level, new ChunkPos(cx, cz));
+                    if (applied) {
+                        // 就地刷新成功：记录已应用的对象库 rev（新 rev 到达时重新登记刷新）
+                        this.appliedRevisions.put(key, this.loader.committedRevision(cx, cz));
+                    }
                     this.applyOverlayToChunk(level, cx, cz);
                     LOGGER.debug("[icbm-slave] 区块刷新: 就地应用新快照 {},{} applied={}",
                             cx, cz, applied);

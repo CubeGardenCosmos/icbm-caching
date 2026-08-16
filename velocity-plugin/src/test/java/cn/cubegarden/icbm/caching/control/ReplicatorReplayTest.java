@@ -91,7 +91,7 @@ class ReplicatorReplayTest {
                 new EncapsulatedControlSession.Listener() {
                 });
         this.server.start();
-        this.sourceConnector = new SourceConnector(this.config, this.service, this.replicator, this.registry);
+        this.sourceConnector = new SourceConnector(this.config, this.service, this.replicator, this.registry, new cn.cubegarden.icbm.caching.control.routing.BackendHealth());
         this.service.setSourceConnector(this.sourceConnector);
         this.sourceConnector.start();
     }

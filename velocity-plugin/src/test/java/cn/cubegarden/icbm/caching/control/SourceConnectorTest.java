@@ -150,7 +150,7 @@ class SourceConnectorTest {
                     "master-1", "lobby-1", PSK, 0,
                     Map.of(), new ServiceConfig.BackendServer("127.0.0.1", backend.port(), SECRET),
                     16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
-            this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry);
+            this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry, new cn.cubegarden.icbm.caching.control.routing.BackendHealth());
             this.sourceConnector.start();
 
             assertTrue(backend.helloAcked.await(5, TimeUnit.SECONDS), "源服 HELLO 必须被接受: " + backend.events);
@@ -186,7 +186,7 @@ class SourceConnectorTest {
                     "master-1", "lobby-1", PSK, 0,
                     Map.of(), new ServiceConfig.BackendServer("127.0.0.1", backend.port(), "wrong-secret"),
                     16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
-            this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry);
+            this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry, new cn.cubegarden.icbm.caching.control.routing.BackendHealth());
             this.sourceConnector.start();
             Thread.sleep(500);
             assertTrue(backend.events.contains("auth_rejected"), "错误 forwarding secret 必须被拒: " + backend.events);
@@ -204,7 +204,7 @@ class SourceConnectorTest {
                     Map.of("1112131415161718191a1b1c1d1e1f20", "SLAVE"),
                     new ServiceConfig.BackendServer("127.0.0.1", backend.port(), SECRET),
                     16 * 1024 * 1024, 8, 20_000, 40_000, PROTOCOL);
-            this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry);
+            this.sourceConnector = new SourceConnector(withBackend, this.service, this.replicator, this.registry, new cn.cubegarden.icbm.caching.control.routing.BackendHealth());
             this.sourceConnector.start();
             assertTrue(backend.helloAcked.await(5, TimeUnit.SECONDS), "源服 HELLO 必须被接受: " + backend.events);
 

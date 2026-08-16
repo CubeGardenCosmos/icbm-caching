@@ -107,12 +107,78 @@ def _wait_log(log: Path, needle: str, timeout: float, label: str) -> bool:
     raise RuntimeError(f"[{label}] 超时未命中: {needle}\n--- 日志尾部 ---\n{tail}")
 
 
+def _probe_source_login(port: int) -> str:
+    """python 模拟 26.3 客户端登录握手（Handshake + Login Start），读 8 秒看服务端是否回包。
+    协议常量仅作探测（帧 VarInt + 包 id 0x00）；26.3 服务端正确回 LoginCompression。"""
+    import hashlib
+
+    def varint(n: int) -> bytes:
+        out = b""
+        while True:
+            b = n & 0x7F
+            n >>= 7
+            if n:
+                out += bytes([b | 0x80])
+            else:
+                out += bytes([b])
+                return out
+
+    def string(s: str) -> bytes:
+        b = s.encode()
+        return varint(len(b)) + b
+
+    def frame(payload: bytes) -> bytes:
+        return varint(len(payload)) + payload
+
+    handshake = frame(b"\x00" + varint(1073742154) + string("127.0.0.1")
+                      + struct.pack(">H", port) + varint(2))
+    hello = frame(b"\x00" + string("probe-player") + hashlib.md5(b"probe").digest())
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+        s.settimeout(8)
+        s.sendall(handshake)
+        s.sendall(hello)
+        chunks = []
+        try:
+            while len(chunks) < 3:
+                data = s.recv(4096)
+                if not data:
+                    break
+                chunks.append(data)
+        except socket.timeout:
+            pass
+        total = sum(len(c) for c in chunks)
+        first = chunks[0][:12].hex() if chunks else ""
+        return f"收到 {total} 字节（{len(chunks)} 段，首段前 12B={first}）"
+
+
 def _send_source_command(proc: subprocess.Popen, command: str) -> None:
     """向源服控制台 stdin 注入命令（DedicatedServer 从 stdin 读控制台命令）。"""
     if proc.stdin is None:
         raise RuntimeError("源服进程无 stdin（无法注入命令）")
     proc.stdin.write((command + "\n").encode())
     proc.stdin.flush()
+
+
+def _wait_snapshot_settle(log: Path, timeout: float = 90, settle: float = 15) -> None:
+    """等快照洪水平息（slave 已装载快照条数 settle 秒内不再增长）。源服 normal 世界初始
+    物化（80 区块）持续发布多 rev 快照，slave 主线程逐 tick 刷新已装载区块——物化期
+    RCON 延迟大（e2e 暴露：主线程忙导致 execute if block 超时）；等平稳后再做操作验证。"""
+    deadline = time.time() + timeout
+    prev = -1
+    stable_since = None
+    while time.time() < deadline:
+        count = log.read_text(errors="replace").count("已装载快照") if log.exists() else 0
+        if count == prev:
+            if stable_since is None:
+                stable_since = time.time()
+            elif time.time() - stable_since >= settle:
+                print(f"  [快照平稳] 已装载快照 {count} 条，{settle}s 未增长（物化期结束）")
+                return
+        else:
+            stable_since = None
+            prev = count
+        time.sleep(2)
+    raise RuntimeError(f"[快照平稳] {timeout}s 内未稳定（快照持续增长: {prev}）")
 
 
 class RconClient:
@@ -202,7 +268,11 @@ def run_e2e() -> int:
                     d.unlink()
                 print(f"  [master] 清理历史状态: {d}")
 
-        # 1) 源服先启动（backend 监听 11430；master 后连）
+        # 1) 源服先启动（backend 监听 11430；master 后连）。测试配置幂等写入（含
+        #    online-mode=false——源服身份验证在 master（auth-gateway），虚拟玩家回环连接
+        #    免加密；debug-run 可能留下 online-mode=true 的 server.properties，e2e 必须覆盖）
+        from . import server as _server_module
+        _server_module._ensure_test_config()
         _write_source_control_config(master_props)
         procs.append(_start(["java", "-Xmx1G", "-jar", "fabric-server-launch.jar", "nogui"],
                             SOURCE_LOG, "源服", paths.DEBUG_SOURCE, env))
@@ -227,10 +297,14 @@ def run_e2e() -> int:
             raise RuntimeError(f"master 对象库无快照: {objects}")
         print(f"  [master] 对象库快照存在: {objects}")
 
-        # 4) slave（连接 master 封装通道；出生点区块装载命中快照）
         slave_server.deploy()
         slave_server.write_slave_control_config(master_props)
-        procs.append(_start(["java", "-Xmx256M", "-jar", "fabric-server-launch.jar", "nogui"],
+        # 堆 256M 是架构约束（ARCHITECTURE §1.2/§3.1）；9.4 e2e 观察：master 重放 500+ 快照
+        # 事件（源服物化 80 区块 + 初始 dirty）时 256M 临界 OOM（9.5 有 256M 压测项）。此处用
+        # 环境变量 ICBM_SLAVE_XMX 覆盖（默认 256M），9.5 回归默认值并优化快照装载内存。
+        import os as _os
+        slave_xmx = _os.environ.get("ICBM_SLAVE_XMX", "256M")
+        procs.append(_start(["java", f"-Xmx{slave_xmx}", "-jar", "fabric-server-launch.jar", "nogui"],
                             SLAVE_LOG, "slave", slave_server.SLAVE_SERVER, env))
         _wait_port("127.0.0.1", SLAVE_PORT, 180, "slave")
         _wait_log(SLAVE_LOG, "master 已连接", 60, "slave↔master")
@@ -238,9 +312,19 @@ def run_e2e() -> int:
 
         # 5) RCON：玩家视角 = execute if block 读取注入区块（里程碑 6 端到端命中）
         _wait_port("127.0.0.1", RCON_PORT, 60, "slave RCON")
+        # 源服 normal 世界初始物化（80 区块）产生快照洪水：等平稳后再执行 RCON 命令（物化期
+        # slave 主线程刷新已装载区块，command 排队 → RCON 5s 超时——e2e 暴露 94g/94k）
+        _wait_snapshot_settle(SLAVE_LOG)
         rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
         try:
-            # force 装载出生点区块是异步的：轮询等 diamond 出现（注入完成）
+            # 源服 normal 世界 seed 随机 → spawn 不保证在 chunk 0,0；execute if block 对未装载
+            # 区块读空气——先 slave 强制装载 0,0。注意 0,0 可能已被生成 EMPTY（forceload 不
+            # 重装，快照 refresh 已消费）→ forceload 后破坏→恢复产生两次新 rev 强制 slave 刷新
+            rcon.command("forceload add 0 0")
+            _send_source_command(procs[0],
+                    "execute in minecraft:overworld positioned 0 64 0 run setblock 0 64 0 minecraft:air")
+            _send_source_command(procs[0], SETBLOCK)
+            # force 装载出生点区块是异步的：轮询等 diamond 出现（注入/刷新完成）
             result = ""
             deadline = time.time() + 90
             while time.time() < deadline:
@@ -254,6 +338,10 @@ def run_e2e() -> int:
             print("  [RCON] 玩家经 slave 看到的方块 = 源服 setblock 目标（端到端命中）")
         finally:
             rcon.close()
+
+        # 源服 normal 世界初始物化（80 区块）产生快照洪水：等平稳后再做操作验证（物化期
+        # slave 主线程刷新已装载区块，RCON 延迟大——e2e 暴露 94g）
+        _wait_snapshot_settle(SLAVE_LOG)
 
         # 6) 乐观操作闭环 + 阶段 9.2 快路径时延度量：slave 经 RCON 触发 BREAK → master →
         #    源服主线程裁决 → OPERATION_COMMITTED → F1 就地应用 canonicalState（玩家视角立即
@@ -353,6 +441,86 @@ def run_e2e() -> int:
             # slave 下行送达（本地广播权威副本 + 送达日志）
             _wait_log(SLAVE_LOG, f"下行权威广播送达: rcon-chatter: {chat_marker}", 30, "slave 下行送达")
             print("  [RCON] 聊天直传闭环：slave 上行 → 源服权威广播（控制台可见）→ 下行分发 → slave 送达")
+        finally:
+            rcon.close()
+
+        # 6d) 9.4 权威会话 v2 背包/互动直传：slave 模拟玩家 use-item（右键放置）→
+        #     MC_PASSTHROUGH 上行 → master → 源服虚拟玩家（回环连接源服游戏端口，26.3 标准
+        #     登录/配置/play）vanilla 权威处理 → 快照管道 → slave 视角验证放置结果来自源服
+        # 首个 passthrough 报文触发虚拟玩家创建（VirtualPlayerSession 由 uuid 首报文物化）
+        rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
+        try:
+            result = rcon.command("icbmslave passthrough useitem 1 64 0 up")
+            print(f"  [RCON] icbmslave passthrough useitem 1 64 0 up → {result!r}")
+            if "已直传 use-item" not in result:
+                raise RuntimeError(f"slave 直传上行失败: {result!r}")
+        finally:
+            rcon.close()
+        # 对照实验：python 模拟 26.3 登录源服（Handshake + Login Start），验证源服对标准
+        # 客户端握手是否回 LoginCompression（若源服正常而虚拟玩家收不到 → 客户端侧问题）
+        time.sleep(2)
+        try:
+            probe = _probe_source_login(SOURCE_PORT)
+            print(f"  [对照] python 模拟登录源服 → {probe}")
+        except Exception as exc:
+            print(f"  [对照] python 模拟登录源服异常: {exc}")
+        # 虚拟玩家登录完成（回环连接源服游戏端口 + 26.3 登录/配置/play）
+        _wait_log(SOURCE_LOG, "虚拟玩家已就绪", 60, "源服虚拟玩家就绪")
+        # 虚拟玩家名从源服日志解析（icbm-<uuid前8>，uuid 与 operate 命令一致）
+        import re as _re
+        source_text = SOURCE_LOG.read_text(errors="replace")
+        m = _re.search(r"虚拟玩家已就绪: (icbm-[0-9a-f]{8})", source_text)
+        if not m:
+            raise RuntimeError(f"源服日志未找到虚拟玩家名: {source_text[-2000:]}")
+        vp_name = m.group(1)
+        # 源服 give 虚拟玩家方块（主手）；tp 到目标附近（虚拟玩家位置 = 源服 spawn，
+        # normal 世界 spawn 随机——use-item 互动距离 4.5 格内才可达）
+        _send_source_command(procs[0], f"tp {vp_name} 1 64 1")
+        _send_source_command(procs[0], f"give {vp_name} minecraft:dirt 1")
+        # 诊断：give 后虚拟玩家主手物品（确认 give 生效）
+        time.sleep(2)
+        _send_source_command(procs[0], f"data get entity {vp_name} Inventory")
+        time.sleep(1)
+        rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
+        try:
+            # 点击 (1,64,0)（flat 世界草地）方向 UP → 放置到 (1,65,0)
+            result = rcon.command("icbmslave passthrough useitem 1 64 0 up")
+            print(f"  [RCON] icbmslave passthrough useitem 1 64 0 up（已就绪，give 后）→ {result!r}")
+            if "已直传 use-item" not in result:
+                raise RuntimeError(f"slave 直传上行失败: {result!r}")
+            # 诊断：use-item 后源服实际方块（确认虚拟玩家 vanilla 放置）
+            # 源服侧断言放置位置（flat 世界 y=64 是空气：点击空气 replaceClicked=true →
+            # 放置替换点击方块 (1,64,0)；点击实体方块则放置到 direction 邻位 (1,65,0)）
+            _send_source_command(procs[0], "execute if block 1 64 0 minecraft:dirt run say PLACED_A")
+            _send_source_command(procs[0], "execute if block 1 65 0 minecraft:dirt run say PLACED_B")
+            time.sleep(4)
+            placed_source = SOURCE_LOG.read_text(errors="replace")
+            placed_at = None
+            if "PLACED_A" in placed_source:
+                placed_at = (1, 64, 0)
+            elif "PLACED_B" in placed_source:
+                placed_at = (1, 65, 0)
+            if placed_at:
+                print(f"  [源服] 权威放置确认: {placed_at} = dirt")
+            else:
+                print("  [源服] 放置未确认（1,64,0/1,65,0 均非 dirt）")
+            # 源服虚拟玩家 vanilla 放置 → 区块 dirty → 快照管道发布
+            _wait_log(SOURCE_LOG, "已提交快照", 60, "源服放置后快照发布")
+            _wait_log(SLAVE_LOG, "已装载快照", 60, "slave 装载放置结果快照")
+            # slave 视角验证（快照回传 = 使用物品结果来自源服）：放置位置 = 源服实际落点
+            # （1,64,0 或 1,65,0，见上方源服断言）
+            check_pos = placed_at if placed_at else (1, 65, 0)
+            deadline = time.monotonic() + 30
+            placed = None
+            while time.monotonic() < deadline:
+                placed = rcon.command(f"execute if block {check_pos[0]} {check_pos[1]} {check_pos[2]} minecraft:dirt")
+                if "Test passed" in placed or "Success" in placed:
+                    break
+                time.sleep(0.05)
+            print(f"  [RCON] 权威放置回显 dirt@{check_pos} → {placed!r}")
+            if "Test passed" not in placed and "Success" not in placed:
+                raise RuntimeError(f"源服权威放置结果未达 slave（{check_pos} 非 dirt）: {placed!r}")
+            print("  [RCON] 背包/互动直传闭环：slave use-item 上行 → 源服虚拟玩家权威放置 → 快照回传 → slave 视角一致")
         finally:
             rcon.close()
 

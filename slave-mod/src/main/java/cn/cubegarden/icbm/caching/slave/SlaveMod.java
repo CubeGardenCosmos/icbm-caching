@@ -132,6 +132,10 @@ public final class SlaveMod implements ModInitializer {
         client.setOperationListener(operationHandler);
         client.setSnapshotReloader(reloader);
         client.setServerRef(server);
+        // 9.4 权威会话 v2：互动/背包直传处理（上行编码 + 下行注入玩家连接）
+        cn.cubegarden.icbm.caching.slave.passthrough.PassthroughHandler passthrough =
+                new cn.cubegarden.icbm.caching.slave.passthrough.PassthroughHandler(client);
+        client.setPassthroughHandler(passthrough);
         // A8：断线 → 丢弃全部 overlay 预测（fail closed；重连后 master 重订阅补齐，世界以快照为准）
         client.setDisconnectCleanup(() -> {
             int dropped = overlay.discardAll();
@@ -188,7 +192,8 @@ public final class SlaveMod implements ModInitializer {
         // 事件时序错乱）；发送者/冷却/合并逻辑复用；bmtool sign/book 保持 slave 本地命令路径。
         client.setChatBroadcastListener(translationService::onAuthoritativeBroadcast);
         SlaveRuntime runtime = SlaveRuntime.create(client, loader, spawnRegistry, loginVerifyGate, playerBounds,
-                overlay, operationHandler, materializeRequester, config.brand(), debugOverlay, translationService);
+                overlay, operationHandler, materializeRequester, config.brand(), debugOverlay, translationService,
+                passthrough);
         SlaveRuntime.install(runtime);
         client.start();
         // 初始同步闸门：装载 spawn 区块前等基线（WORLD_EPOCH/快照）；超时不阻断（fail closed）

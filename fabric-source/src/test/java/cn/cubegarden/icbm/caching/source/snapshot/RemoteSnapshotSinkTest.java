@@ -40,7 +40,7 @@ class RemoteSnapshotSinkTest {
 
     private static RemoteSnapshotSink sink() throws Exception {
         RemoteSnapshotSink sink = new RemoteSnapshotSink(
-                "127.0.0.1", 0, SECRET, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
+                null, "127.0.0.1", 0, SECRET, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3", "0.157.1+26.3",
                 "modpack-hash", "registry-hash");
         sink.start();
         return sink;
@@ -133,7 +133,7 @@ class RemoteSnapshotSinkTest {
     @Test
     void notConnectedFailsClosed() {
         RemoteSnapshotSink sink = new RemoteSnapshotSink(
-                "127.0.0.1", 1, SECRET, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3",
+                null, "127.0.0.1", 1, SECRET, "test-source", "lobby-1", "26.3", 1073742154, "0.19.3",
                 "0.157.1+26.3", "modpack-hash", "registry-hash");
         assertFalse(sink.available(), "未连接时不可用（fail closed）");
         sink.close();

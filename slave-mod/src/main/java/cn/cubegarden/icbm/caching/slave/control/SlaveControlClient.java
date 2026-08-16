@@ -58,6 +58,7 @@ public final class SlaveControlClient implements AutoCloseable {
     private Object verifyResult;
     private volatile OperationListener operationListener;
     private volatile cn.cubegarden.icbm.caching.slave.world.SnapshotReloader snapshotReloader;
+    private volatile cn.cubegarden.icbm.caching.slave.passthrough.PassthroughHandler passthroughHandler;
     /** 断线清理回调（A8 审计修复：fail closed——断线后不得展示不确定的 overlay 预测）。 */
     private volatile Runnable disconnectCleanup;
 
@@ -189,6 +190,11 @@ public final class SlaveControlClient implements AutoCloseable {
 
     public void setOperationListener(OperationListener listener) {
         this.operationListener = listener;
+    }
+
+    /** 权威会话 v2 直传处理（阶段 9.4）：MC_PASSTHROUGH 下行 → 玩家连接注入。 */
+    public void setPassthroughHandler(cn.cubegarden.icbm.caching.slave.passthrough.PassthroughHandler handler) {
+        this.passthroughHandler = handler;
     }
 
     /** 装配快照刷新器（快照到达后重载已装载区块；null = 不刷新）。 */
@@ -373,6 +379,22 @@ public final class SlaveControlClient implements AutoCloseable {
             } catch (Exception e) {
                 LOGGER.error("[icbm-slave] LOGIN 回执解码失败（fail closed，拒登录）: {}", e.toString());
                 SlaveControlClient.this.wakeVerify(null);
+            }
+        }
+
+        @Override
+        public void onMcPacket(byte[] body) {
+            // 9.4 权威会话 v2 下行：源服 clientbound（白名单）→ 本地玩家连接注入
+            cn.cubegarden.icbm.caching.slave.passthrough.PassthroughHandler handler =
+                    SlaveControlClient.this.passthroughHandler;
+            if (handler != null) {
+                try {
+                    handler.onDownstream(body);
+                } catch (RuntimeException e) {
+                    LOGGER.error("[icbm-slave] 权威下行注入异常（fail closed 丢弃）: {}", e.toString());
+                }
+            } else {
+                LOGGER.debug("[icbm-slave] 权威下行丢弃（直传处理未装配）");
             }
         }
 

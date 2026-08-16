@@ -33,6 +33,11 @@ public final class MixinTargetVerifier {
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleUseItemOn")
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleUseItem")
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleInteract")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleContainerClick")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleContainerClose")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleContainerButtonClick")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleContainerSlotStateChanged")
+                && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "handleSetCarriedItem")
                 && checkMethod("net.minecraft.server.network.ServerGamePacketListenerImpl", "ackBlockChangesUpTo")
                 && checkMethod("net.minecraft.server.MinecraftServer", "getServerModName")
                 // 阶段 9.1 边缘世界计算禁用（WorldSim mixins）目标

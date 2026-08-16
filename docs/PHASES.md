@@ -249,15 +249,29 @@
 - [x] 顺带修复：e2e 操作时序竞态（warm 复操作前等恢复快照；拒绝路径位置换 chunk 避开单
       pending 撞车）；master 操作转发发送失败显式日志 + fail closed 路由 REJECTED。
 
-### 9.4 背包/互动直传（权威会话桥 v2：虚拟玩家）
+### 9.4 背包/互动直传（权威会话桥 v2：虚拟玩家）——已完成
 
-- [ ] 草稿 `draft/authoritative-session-v2/`（官方虚拟连接要求、Velocity 注入思路借鉴、
-      Protocolize 不引入结论保持）。
-- [ ] 源服虚拟玩家会话：master 为每个真实玩家建立/销毁源服会话；BackendControlSession 丢弃改分发。
-- [ ] master McPassthroughBridge 单会话 → 多会话（按 playerUuid 路由）。
-- [ ] slave 互动包从拒绝改直传（use-item/interact/背包/容器 → MC_PASSTHROUGH 上行；下行注入真实
-      客户端连接按真实会话重封装）。
-- [ ] 验证：开背包移动物品/容器互动结果来自源服；断线 fail closed 不本地猜测库存。
+- [x] 草稿 `draft/authoritative-session-v2/`：官方 26.3 虚拟连接要求逐路径核对（Connection
+      connectToServer/initiateServerboundPlayConnection、ServerLoginPacketListenerImpl
+      handleHello:117/:164/:229、ServerConfigurationPacketListenerImpl:83/:202、26.3 客户端
+      进世界需回 ServerboundPlayerLoadedPacket（hasClientLoaded））；参考仓库（Velocity 注入
+      思路、Protocolize 不引入保持）；差异取舍（虚拟玩家不移动、位置 = 源服 spawn、e2e tp 到
+      目标；secure chat 等后续）。
+- [x] 源服虚拟玩家会话：`VirtualPlayerSession` 手动 Socket + 26.3 登录/配置/play 状态机
+      （压缩/keepalive/ping/传送确认/PlayerLoaded 响应），`VirtualPlayerRegistry` 按
+      playerUuid 路由，`BackendControlSession` 丢弃改分发。
+- [x] master `McPassthroughBridge` 单会话 → 多会话（body v2 = [uuid(16)][seq(8)][len(4)][报文]
+      按 playerUuid 路由）；顺带修复 v1 遗留：BackendHealth.markConnected/markActivity 从未
+      接线 → 权威桥授权恒失败（9.4 首次触发暴露）。
+- [x] slave 互动包从拒绝改直传：handleUseItem/handleInteract/背包（Container*）/
+      SetCarriedItem/PlayerAction 非挖掘 → MC_PASSTHROUGH 上行；下行 decode clientbound →
+      player.connection.send 注入。
+- [x] 验证：e2e use-item 闭环（源服虚拟玩家权威放置 → 快照 → slave 视角一致）；断线 fail
+      closed（backend 断 → 虚拟会话销毁 → 快照自然回滚）；9.2/9.3 回归全绿（首次 58ms /
+      warm 55ms）；全组件测试绿。
+- [x] 顺带修复：refreshLoaded 旧 rev 覆盖竞态（appliedRevisions）、e2e 源服
+      pause-when-empty-seconds 丢失（空服 60s 自动停止）、e2e 源服 online-mode 残留
+      （debug-run 配置覆盖为 false——源服身份验证在 master）、e2e 快照洪水平稳等待。
 
 ### 9.5 验证收尾与文档定稿（吸收原 8.3 开放项）
 

@@ -454,22 +454,33 @@ SESSION_CLOSED；master 侧 SessionRegistry（控制服务内模块）经 Contro
 - offline 模式（开发/测试）：master 配置开关，verify=false 时直接放行但仍记账（沿用测试服务器惯例）。
 - 重复会话策略（拒新 / 踢旧）与“源服 + 一个缓存后端同时在线”是否允许，由部署策略定案。
 
-## 10. 权威会话桥（里程碑 5 v1；ARCHITECTURE §3.2）
+## 10. 权威会话桥（里程碑 5 v1；ARCHITECTURE §3.2）→ v2 虚拟玩家（阶段 9.4）
 
 权威会话（玩家需要源服实时权威数据）时，slave 把明文 Minecraft 报文经封装通道
 **MC_PASSTHROUGH 流（streamId=2）** 交给 master，master 以 velocity 授信模式转发到源服
 （backend 封装通道扩展承载 MC_PASSTHROUGH 流）；源服返回的数据包在 master 侧缓存后回传
 slave。
 
-- 方向与承载：slave ↔ master 与 master ↔ 源服均走封装通道 MC_PASSTHROUGH 流，body =
-  `[流序号(8)][长度(4)][明文 MC 报文字节]`，**master 只做字节透传**（不解析 26.3 包结构，
-  不复制常量）；流序号由发起方维护（master 不校验内容）。
-- 桥建立：slave 发起（首个报文）登记为**单一活跃权威会话**（v1；多玩家并发随阶段 6/7
-  虚拟玩家连接）；master 经落点判定授权（源服健康 + 断路器未 OPEN）；源服故障/断路器 OPEN
-  → 拒绝转发，slave 继续缓存会话（后端故障 fallback，fail closed 不猜测）。
+- **v2（阶段 9.4）body 格式**：`[playerUuid(16)][流序号(8)][长度(4)][明文 MC 报文字节]`
+  ——v1 无 playerUuid，master 无法区分多虚拟玩家下行来源；v2 按 playerUuid 多会话路由
+  （每真实玩家一个源服虚拟玩家会话）。master 只做字节透传 + uuid 路由（不解析 26.3 包
+  结构，不复制常量）；流序号由发起方（slave 上行 / 源服下行）各自维护。明文 MC 报文 =
+  `[packetId VarInt + fields]`（不含长度——注入侧 Connection 管线加 VarInt 长度帧）。
+- 桥建立：slave 上行首报文（uuid 首次见）登记路由并触发源服虚拟玩家会话创建
+  （`VirtualPlayerSession`：源服 mod 内回环连接源服游戏端口，26.3 标准登录/配置/play
+  流程成为真实玩家实体，Connection.java:409/247 + ServerLoginPacketListenerImpl:117/
+  :164/:229 + ServerConfigurationPacketListenerImpl:83/:202）；master 经落点判定授权
+  （源服健康 + 断路器未 OPEN）；源服故障/断路器 OPEN → 拒绝转发，slave 继续缓存会话
+  （后端故障 fallback，fail closed 不猜测）。
+- 虚拟玩家生命周期 = 真实玩家会话生命周期：slave 断开/backend 断线 → 源服销毁虚拟会话
+  （玩家踢出，快照管道自然回滚）；虚拟玩家名 = `icbm-<uuid前8>`（源服 give/命令定位；
+  parity：非真实玩家名）。
+- 下行白名单：源服只回传权威会话相关 clientbound 包（背包/容器/物品栏/方块互动结果），
+  区块/实体全量流不回传（快照管道是区块权威）；slave 解码后经 `player.connection.send`
+  走标准管线（编码+压缩+VarInt 长度）注入真实客户端连接。
 - 数据包缓存（PacketLog）：master 对每条转发报文做字节级审计日志（方向/时间戳/长度/
   SHA-256，有界内存）；**对象库仍是唯一基线**（committed+epoch 守卫不变）——权威会话期间
-  源服区块数据由源服快照管道（ChunkSnapshotTicker）经既有 PUT_SNAPSHOT 进对象库，"源服
-  返回数据包形成快照"的落点。字节日志不参与基线判定。
-- 源服侧：BackendControlSession 新增 MC_PASSTHROUGH 流回调（默认丢弃，fail closed）；
-  虚拟玩家连接（把报文注入真实 Minecraft 连接）随阶段 6/7 端到端实现。
+  源服区块数据由源服快照管道（ChunkSnapshotTicker）经既有 PUT_SNAPSHOT 进对象库。字节日志
+  不参与基线判定。
+- 源服侧：BackendControlSession MC_PASSTHROUGH 流回调（v1 默认丢弃）→ v2 改为分发到
+  `VirtualPlayerRegistry`（按 playerUuid 路由虚拟会话注入）。

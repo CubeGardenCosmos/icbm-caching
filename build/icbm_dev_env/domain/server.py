@@ -68,6 +68,8 @@ def _ensure_test_config() -> None:
         "simulation-distance=4\n"
         "enable-command-block=true\n"
         "white-list=false\n"  # 26.3 默认 true；测试流程用 RCON 无玩家，显式关闭防误拒
+        "pause-when-empty-seconds=0\n"  # 空服持续 tick（脏标记 → 快照发布/操作裁决依赖 Server thread；
+        # 默认 60s 暂停→停止会杀掉 e2e 后半段——9.4 暴露）
     )
 
 
