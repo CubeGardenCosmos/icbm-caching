@@ -1,7 +1,8 @@
 # 阶段性任务与验收条件
 
-状态：阶段 8（游戏内功能完善：真实玩家操作 + 快照覆盖扩容）为当前规划；
-      阶段 1-7 与修正后基线的成果作为已完成记录保留（下方压缩为交付摘要，不再逐条 checkbox）。
+状态：阶段 9（CDN 化改造：边缘会话 + 直传权威面；修复「破坏不同步/聊天不同步」两项已知缺陷）
+      为当前规划，规划细节见 docs/PHASE9_PLAN.md；阶段 1-8 的成果作为已完成记录保留（下方压缩为
+      交付摘要，不再逐条 checkbox）。
 原则：先证明源服权威性和回滚正确性，再扩大可预测操作和优化性能；任何新功能先走
       `build/workspace/draft/<功能名>` 三步草稿（参考仓库 → 官方源码 → 差异取舍，AGENTS.md 硬约束）。
 
@@ -155,14 +156,15 @@
       响应解析/错误 fail closed）、TranslationServiceTest（toggle/冷却/截断）、SlaveConfigTest
       （llm.* 解析/未知短码 fail closed/UTF-8 中文提示词）全绿；全组件测试通过。
 
-### 8.3 验证与收尾（吸收原阶段 2/6/7 开放项）
+### 8.3 验证与收尾（吸收原阶段 2/6/7 开放项；开放项已并入阶段 9.5）
 
 - [ ] 真机闭环验收：debug-run + 真实客户端——出生点周边 ≥N（如 25）区块可进入；破坏/放置经
       操作管道全链路（预测可见 → 源服裁决 → 快照 → slave 刷新 → 视角与源服权威一致）。
-- [ ] 原阶段 2 遗留：源服游戏端口仅接受受信节点（master/受信接入）的隔离验证。
+      （并入 9.5；破坏快路径见 9.2）
+- [ ] 原阶段 2 遗留：源服游戏端口仅接受受信节点（master/受信接入）的隔离验证。（并入 9.5）
 - [ ] 原阶段 7 剩余：256M 堆压测（长时间浏览/移动/操作，256M 堆）、真实客户端故障模拟
-      （网络分区/缓存损坏/源服回档，全部 fail closed 复验）。
-- [ ] parity matrix 更新：生存挖掘动画、掉落、经验、物化边界等有意差异记录。
+      （网络分区/缓存损坏/源服回档，全部 fail closed 复验）。（并入 9.5）
+- [ ] parity matrix 更新：生存挖掘动画、掉落、经验、物化边界等有意差异记录。（并入 9.5）
 
 验收：
 
@@ -172,6 +174,73 @@
       不匹配仍 fail closed（不展示旧区块）。
 - [ ] master 重放缺陷修复后 slave 对象库水位与 master 一致（多 revision 重放回归测试）。
 - [ ] 全组件测试绿 + 协议 golden 锁定 + 256M 约束保持（slave 堆自检通过）。
+
+## 阶段 9：CDN 化改造（边缘会话 + 直传权威面）——当前规划
+
+背景（真机连入测试，阶段 8 收尾前暴露两项已知缺陷；根因与规划细节见 `docs/PHASE9_PLAN.md`）：
+
+1. **玩家破坏方块不能被快速同步**：预测即时、权威同步滞后——多 tick 管线（COMMITTED 与 SNAPSHOT
+   双往返）+ 源服无玩家时目标区块卸载（物化 ticket 发布即释放）触发 1 tick/次重试、最坏 400 tick
+   （20s）超时拒绝 → 幽灵方块回显。
+2. **玩家聊天不能被同步**：聊天只在 slave 本地广播，master/源服/其它 slave 看不到；源服虚拟玩家
+   连接未实现（CACHE_PROTOCOL §10 预留能力未落地），不存在权威广播方与下行分发通道。
+
+模型定位（CDN 语义）：slave = CDN 边缘节点（全球部署反向代理源站、缓存高频数据=区块快照，接管
+除地图外的玩家 tick 事件）；master = 控制面/聚合层；源服 = 源站（唯一权威）。玩家除 bmtool 外，
+聊天、背包等内容直传 master；破坏方块以 master→源服裁决为权威（快路径化）；红石等世界演化
+不归 slave。
+
+### 9.1 边缘世界计算禁用（红石不归 slave）
+
+- [ ] 草稿 `draft/edge-no-world-sim/` 三步流程（官方 ServerLevel.tick/tickChunk/NaturalSpawner/
+      计划刻路径，类名以 minecraft-assets 核对）。
+- [ ] gamerule 兜底：doRandomTick/doMobSpawning/doDaylightCycle/doWeatherCycle=false。
+- [ ] Mixin 禁用不可由 gamerule 覆盖的路径：计划刻/红石、流体 tick、方块实体 tick、非玩家实体
+      tick（只保留 ServerPlayer）、生物生成（NaturalSpawner）。
+- [ ] 时间处理决策（冻结 v1 / 源服周期同步）记录 parity。
+- [ ] MixinTargetVerifier 扩展 tick 目标自检（fail closed）。
+- [ ] 验证：红石不 tick、作物不生长、无生物生成、玩家移动/视角正常；全组件测试绿。
+
+### 9.2 破坏快速同步（master 权威快路径）
+
+- [ ] 草稿 `draft/fast-operation-sync/`。
+- [ ] F1：OPERATION_COMMITTED 到达 slave 就地应用 canonicalState（Server thread，UPDATE_CLIENTS），
+      视角一致不再等 SNAPSHOT 往返。
+- [ ] F2：源服操作目标 chunk 热驻留（warm ticket 30s + 物化状态机 PUBLISHED_HOLD 阶段）。
+- [ ] F3：NeedsChunk 加载完成回调同 tick 续裁（保留 400 tick 上限 fail closed）。
+- [ ] F4（可选）：pending 操作区块快照优先发布。
+- [ ] 验证：e2e 时延度量（热 ≤200ms / 冷 ≤1s）+ 拒绝路径即时回显回归。
+
+### 9.3 聊天直传 master（CHAT_RELAY + 下行分发）
+
+- [ ] 草稿 `draft/chat-relay/`（secure chat 签名链差异取舍记 parity）。
+- [ ] 协议 CHAT_RELAY(0x1D)/CHAT_BROADCAST(0x1E) + codec + golden + CACHE_PROTOCOL 同一提交；
+      slave 本地不再广播，聊天上行→master→源服权威广播→下行分发所有 slave。
+- [ ] LLM 翻译迁移到接收路径（下行广播送达钩子触发；bmtool sign/book 保持 slave 本地）。
+- [ ] 验证：双 slave 互通 + 源服控制台可见；翻译生效；golden 锁定。
+
+### 9.4 背包/互动直传（权威会话桥 v2：虚拟玩家）
+
+- [ ] 草稿 `draft/authoritative-session-v2/`（官方虚拟连接要求、Velocity 注入思路借鉴、
+      Protocolize 不引入结论保持）。
+- [ ] 源服虚拟玩家会话：master 为每个真实玩家建立/销毁源服会话；BackendControlSession 丢弃改分发。
+- [ ] master McPassthroughBridge 单会话 → 多会话（按 playerUuid 路由）。
+- [ ] slave 互动包从拒绝改直传（use-item/interact/背包/容器 → MC_PASSTHROUGH 上行；下行注入真实
+      客户端连接按真实会话重封装）。
+- [ ] 验证：开背包移动物品/容器互动结果来自源服；断线 fail closed 不本地猜测库存。
+
+### 9.5 验证收尾与文档定稿（吸收原 8.3 开放项）
+
+- [ ] 真机闭环验收（原 8.3）：≥25 区块可进入；破坏/放置快路径全链路视角一致。
+- [ ] 源服游戏端口受信隔离验证（原 8.3）。
+- [ ] 256M 堆压测 + 真实客户端故障模拟（原 8.3）。
+- [ ] parity matrix 更新（生存挖掘/掉落/经验、物化边界、世界时间冻结、聊天签名校验、红石不演化）。
+- [ ] 文档定稿：ARCHITECTURE（CDN 职责表/报文分流）、HIERARCHY（虚拟玩家会话）、
+      CACHE_PROTOCOL（聊天中继/权威会话 v2）、本文件归档。
+
+阶段 9 验收：slave 世界计算全禁用（自检通过）；破坏/放置热 ≤200ms / 冷 ≤1s 视角一致、拒绝即时
+回显；聊天跨 slave/源服互通且翻译生效；背包/容器直传源服权威处理并回传；全组件测试绿 + golden
+锁定 + 256M 约束保持。
 
 ## 阻塞条件
 
