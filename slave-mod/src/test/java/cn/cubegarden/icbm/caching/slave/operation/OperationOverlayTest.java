@@ -2,6 +2,7 @@ package cn.cubegarden.icbm.caching.slave.operation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -65,6 +66,20 @@ class OperationOverlayTest {
         assertNull(overlay.predictedStateAt(10, 64, 20), "COMMITTED 后不得保留幽灵预测");
         assertFalse(overlay.hasPendingAt(10, 64, 20));
         assertTrue(overlay.pendingSnapshot().isEmpty());
+    }
+
+    @Test
+    void committedReturnsPendingForFastApply() {
+        // 阶段 9.2 F1：COMMITTED 反查返回 pending（pos/dimension），slave 就地应用 canonicalState
+        OperationOverlay overlay = new OperationOverlay();
+        Messages.SubmitOperation op = op(10, 20);
+        overlay.submit(hexOf(op.operationId()), "player-a", op, "minecraft:diamond_block");
+        OperationOverlay.Pending pending = overlay.onCommitted(op.operationId());
+        assertNotNull(pending, "COMMITTED 后必须能反查 pending（F1 就地应用定位）");
+        assertEquals(10, pending.posX);
+        assertEquals(20, pending.posZ);
+        assertEquals(DIM, pending.dimension);
+        assertNull(overlay.onCommitted(op.operationId()), "未知 operationId → null（重复终态 no-op）");
     }
 
     @Test

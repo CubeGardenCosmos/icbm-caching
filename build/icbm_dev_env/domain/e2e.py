@@ -255,26 +255,74 @@ def run_e2e() -> int:
         finally:
             rcon.close()
 
-        # 6) 乐观操作闭环（里程碑 7）：slave 经 RCON 触发 BREAK → master → 源服主线程裁决
-        #    → OPERATION_COMMITTED → 快照管道 → slave 展示 air
+        # 6) 乐观操作闭环 + 阶段 9.2 快路径时延度量：slave 经 RCON 触发 BREAK → master →
+        #    源服主线程裁决 → OPERATION_COMMITTED → F1 就地应用 canonicalState（玩家视角立即
+        #    air，不再等快照往返）→ 快照管道确认（refreshLoaded 差异为空幂等）
         rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
         try:
-            result = rcon.command("icbmslave operate 0 64 0 break")
-            print(f"  [RCON] icbmslave operate 0 64 0 break → {result!r}")
+            def operate_and_measure(x: int, label: str, limit: float) -> float:
+                """提交操作并高频轮询玩家视角一致；返回时延秒数（热 ≤200ms）。"""
+                t0 = time.monotonic()
+                result = rcon.command(f"icbmslave operate {x} 64 0 break")
+                if "已提交操作" not in result:
+                    raise RuntimeError(f"slave 操作提交失败: {result!r}")
+                deadline = time.monotonic() + 10
+                hit = None
+                while time.monotonic() < deadline:
+                    verify = rcon.command(f"execute if block {x} 64 0 minecraft:air")
+                    if "Test passed" in verify or "Success" in verify:
+                        hit = time.monotonic()
+                        break
+                    time.sleep(0.05)
+                if hit is None:
+                    raise RuntimeError(f"[{label}] 操作后 {x},64,0 不是 air: {verify!r}")
+                elapsed = hit - t0
+                print(f"  [RCON] [{label}] 操作 → 玩家视角一致: {elapsed * 1000:.0f}ms（limit {limit * 1000:.0f}ms）")
+                if elapsed > limit:
+                    raise RuntimeError(f"[{label}] 时延超标: {elapsed * 1000:.0f}ms > {limit * 1000:.0f}ms")
+                return elapsed
+
+            # 冷/热路径：首次操作目标 0,0 已装载（出生点 + warm ticket）
+            first = operate_and_measure(0, "首次-管线热身", 1.0)
+            # 恢复目标方块（源服 setblock → 快照 → slave；0,0 warm ticket 内不卸载）
+            _send_source_command(procs[0],
+                    "execute in minecraft:overworld positioned 0 64 0 run setblock 0 64 0 minecraft:diamond_block")
+            _wait_log(SLAVE_LOG, "COMMITTED 就地应用", 60, "F1 就地应用 canonicalState")
+            # 同 chunk 第二次操作（F2 warm ticket 30s 内不再重载）：热路径 ≤200ms
+            second = operate_and_measure(0, "热路径-warm", 0.2)
+            print(f"  [度量] 首次 {first * 1000:.0f}ms / warm 复操作 {second * 1000:.0f}ms（9.2 验收 热≤200ms）")
+            # F1 直接证据：COMMITTED 就地应用日志（不再依赖快照往返）
+            _wait_log(SLAVE_LOG, "操作已提交", 60, "slave 操作终态")
+            _wait_log(SLAVE_LOG, "已装载快照", 60, "快照确认（refreshLoaded 幂等）")
+            print("  [RCON] 玩家经 slave 看到的操作效果 = 源服权威裁决结果（乐观操作闭环 + F1 快路径）")
+        finally:
+            rcon.close()
+
+        # 6b) 拒绝路径即时回显回归：源服造 bedrock（不可破坏）→ slave BREAK → REJECTED →
+        #     RESYNC 落回 committed（bedrock 仍展示），不产生幽灵回显
+        _send_source_command(procs[0], "execute in minecraft:overworld run forceload add 1 1")
+        _send_source_command(procs[0], "execute in minecraft:overworld positioned 1 64 1 run setblock 1 64 1 minecraft:bedrock")
+        _wait_log(SLAVE_LOG, "已装载快照", 60, "bedrock 快照到达 slave")
+        rcon = RconClient("127.0.0.1", RCON_PORT, _rcon_password())
+        try:
+            # slave 侧装载 1,1（RCON execute if block 对未装载区块读空气，无法验证）
+            result = rcon.command("forceload add 1 1")
+            print(f"  [RCON] slave forceload 1 1 → {result!r}")
+            result = rcon.command("icbmslave operate 1 64 1 break")
+            print(f"  [RCON] icbmslave operate 1 64 1 break → {result!r}")
             if "已提交操作" not in result:
                 raise RuntimeError(f"slave 操作提交失败: {result!r}")
-            _wait_log(SLAVE_LOG, "操作已提交", 60, "slave 操作终态")
-            # 源服权威执行后经快照管道覆盖 slave → 玩家视角看到 air
-            deadline = time.time() + 90
-            while time.time() < deadline:
-                verify = rcon.command("execute if block 0 64 0 minecraft:air")
+            _wait_log(SLAVE_LOG, "操作被拒", 60, "slave 拒绝终态")
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                verify = rcon.command("execute if block 1 64 1 minecraft:bedrock")
                 if "Test passed" in verify or "Success" in verify:
                     break
-                time.sleep(2)
-            print(f"  [RCON] execute if block 0 64 0 air → {verify!r}")
+                time.sleep(0.05)
+            print(f"  [RCON] 拒绝路径回显 bedrock → {verify!r}")
             if "Test passed" not in verify and "Success" not in verify:
-                raise RuntimeError(f"操作后 0,64,0 不是 air: {verify!r}")
-            print("  [RCON] 玩家经 slave 看到的操作效果 = 源服权威裁决结果（乐观操作闭环）")
+                raise RuntimeError(f"拒绝后 1,64,1 不是 bedrock（RESYNC 未回显）: {verify!r}")
+            print("  [RCON] 拒绝路径即时回显（源服不可破坏裁决 → slave 落回 committed，无幽灵方块）")
         finally:
             rcon.close()
 

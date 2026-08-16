@@ -76,9 +76,34 @@ public final class ChunkSnapshotTicker {
             return;
         }
         Set<ChunkKey> keys = this.tracker.dirtySet().drain();
-        for (ChunkKey key : keys) {
+        if (keys.size() <= 1) {
+            for (ChunkKey key : keys) {
+                this.publish(server, key);
+            }
+            return;
+        }
+        // 阶段 9.2 F4（可选）：含未决操作的区块优先发布（减少 COMMITTED 到 SNAPSHOT 的
+        // 间隔，降低确认延迟；纯排序无协议改动）
+        java.util.List<ChunkKey> prioritized = new java.util.ArrayList<>(keys);
+        prioritized.sort((a, b) -> {
+            boolean aPending = this.hasPendingOperation(a);
+            boolean bPending = this.hasPendingOperation(b);
+            return aPending == bPending ? 0 : (aPending ? -1 : 1);
+        });
+        for (ChunkKey key : prioritized) {
             this.publish(server, key);
         }
+    }
+
+    /** 该区块是否有未决操作（F4；经 SourceRuntime 查操作队列 pendingChunks，null 安全）。 */
+    private boolean hasPendingOperation(ChunkKey key) {
+        cn.cubegarden.icbm.caching.source.SourceRuntime runtime =
+                cn.cubegarden.icbm.caching.source.SourceRuntime.current();
+        if (runtime == null) {
+            return false;
+        }
+        return runtime.operationQueue().pendingChunks().contains(
+                ((long) key.x() << 32) ^ (key.z() & 0xFFFFFFFFL));
     }
 
     /** 首次启动时声明各已知维度的当前 epoch（sink 恢复维度 epoch 基线）。 */
@@ -119,7 +144,7 @@ public final class ChunkSnapshotTicker {
                         this.publisher.put(snapshot);
                         this.publisher.commit(snapshot.key(), snapshot.revision());
                         this.publisher.endTick(snapshot.key());
-                        LOGGER.debug("[icbm-source] 已提交快照: {} rev={} epoch={}",
+                        LOGGER.info("[icbm-source] 已提交快照: {} rev={} epoch={}",
                                 snapshot.key(), snapshot.revision(), snapshot.epoch());
                     });
                 });

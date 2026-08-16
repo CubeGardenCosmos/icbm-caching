@@ -72,17 +72,18 @@ public final class IcbmSource implements ModInitializer {
                     service, publisher, tracker, gate, registryFingerprint);
             ticker.announceInitialEpochs();
 
-            // 乐观操作（里程碑 7 阶段 5）：主线程队列 + 模拟玩家裁决；结果经 sink 回发
-            cn.cubegarden.icbm.caching.source.operation.OperationQueue operationQueue =
-                    new cn.cubegarden.icbm.caching.source.operation.OperationQueue(
-                            new cn.cubegarden.icbm.caching.source.operation.OperationAdjudicator(
-                                    tracker, service),
-                            sink::sendOperationResult);
-
             // 物化（8.2）：初始区域 + 按需 REQ；每 tick 限量 8 区块（节流）
             cn.cubegarden.icbm.caching.source.materialize.MaterializeService materialize =
                     new cn.cubegarden.icbm.caching.source.materialize.MaterializeService(
                             service, tracker, 8);
+
+            // 乐观操作（里程碑 7 阶段 5 + 阶段 9.2 快路径）：主线程队列 + 模拟玩家裁决；
+            // 结果经 sink 回发；终态后委托 materialize.hold 热驻留（F2，30s warm ticket）
+            cn.cubegarden.icbm.caching.source.operation.OperationQueue operationQueue =
+                    new cn.cubegarden.icbm.caching.source.operation.OperationQueue(
+                            new cn.cubegarden.icbm.caching.source.operation.OperationAdjudicator(
+                                    tracker, service),
+                            sink::sendOperationResult, materialize);
 
             SourceRuntime.install(new SourceRuntime(gate, service, tracker, publisher, ticker,
                     operationQueue, materialize));

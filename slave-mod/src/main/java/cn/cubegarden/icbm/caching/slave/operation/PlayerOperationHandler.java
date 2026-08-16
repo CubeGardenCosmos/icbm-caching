@@ -15,6 +15,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
@@ -190,13 +191,23 @@ public final class PlayerOperationHandler implements SlaveControlClient.Operatio
                 target.getX(), target.getY(), target.getZ(), reason);
     }
 
-    // ===================== 终态回调（SlaveControlClient 通道线程；只改 overlay + 登记 resync） =====================
+    // ===================== 终态回调（SlaveControlClient 通道线程；COMMITTED 就地应用，REJECTED 登记 resync） =====================
 
+    /**
+     * 阶段 9.2 F1 快路径（草稿 fast-operation-sync §3.1）：COMMITTED 到达后立即把权威
+     * canonicalState 就地应用到已装载 LevelChunk（Server thread，UPDATE_CLIENTS）——视角
+     * 不再等 SNAPSHOT 往返；随后到达的 SNAPSHOT_PUSH 经 refreshLoaded 差异为空（天然幂等，
+     * 作为确认）。canonicalState 解析失败/区块未装载 → 跳过（快照管道兜底，fail closed
+     * 不猜测）。
+     */
     @Override
     public void onCommitted(Messages.OperationCommitted committed) {
-        this.overlay.onCommitted(committed.operationId());
+        OperationOverlay.Pending pending = this.overlay.onCommitted(committed.operationId());
         LOGGER.info("[icbm-slave] 操作已提交: op={} state={} rev={}",
                 hex(committed.operationId()), committed.canonicalState(), committed.chunkRevision());
+        if (pending != null) {
+            this.applyCanonical(pending, committed.canonicalState());
+        }
     }
 
     @Override
@@ -208,7 +219,13 @@ public final class PlayerOperationHandler implements SlaveControlClient.Operatio
     public void onStatusRes(Messages.OperationStatusRes res) {
         String id = hex(res.operationId());
         switch (res.status()) {
-            case COMMITTED -> this.overlay.onCommitted(res.operationId());
+            case COMMITTED -> {
+                // 超时查询路径：同样就地应用权威状态（F1 同语义）
+                OperationOverlay.Pending pending = this.overlay.onCommitted(res.operationId());
+                if (pending != null) {
+                    this.applyCanonical(pending, res.canonicalState());
+                }
+            }
             case REJECTED -> this.resyncAfterReject(res.operationId(), res.rejectReason());
             case UNKNOWN, PENDING -> {
                 if (res.status() == Messages.OperationStatusRes.OperationStatus.UNKNOWN) {
@@ -230,6 +247,38 @@ public final class PlayerOperationHandler implements SlaveControlClient.Operatio
                 resync.size(), hex(operationId), reason);
     }
 
+    /** F1 就地应用（通道线程调用；切 Server thread 执行）。canonicalState 解析失败或区块
+     *  未装载 → 跳过（SNAPSHOT 到达时 refreshLoaded 兜底，天然幂等）。 */
+    private void applyCanonical(OperationOverlay.Pending pending, String canonicalState) {
+        BlockState state = parseCanonical(canonicalState);
+        if (state == null) {
+            LOGGER.error("[icbm-slave] canonicalState 解析失败（不应用，等快照纠正，fail closed）: "
+                    + "state={}", canonicalState);
+            return;
+        }
+        MinecraftServer server = this.client.serverRef();
+        if (server == null) {
+            return;
+        }
+        server.execute(() -> {
+            ServerLevel level = server.getLevel(net.minecraft.resources.ResourceKey.create(
+                    net.minecraft.core.registries.Registries.DIMENSION,
+                    net.minecraft.resources.Identifier.parse(pending.dimension.id())));
+            if (level == null) {
+                return;
+            }
+            int cx = Math.floorDiv(pending.posX, 16);
+            int cz = Math.floorDiv(pending.posZ, 16);
+            if (level.getChunkSource().getChunkNow(cx, cz) == null) {
+                return; // 未装载：进入时 scheduleChunkLoad 命中最新快照，无需就地应用
+            }
+            level.setBlock(new BlockPos(pending.posX, pending.posY, pending.posZ),
+                    state, Block.UPDATE_CLIENTS);
+            LOGGER.info("[icbm-slave] COMMITTED 就地应用 canonicalState: pos={},{},{} state={}",
+                    pending.posX, pending.posY, pending.posZ, canonicalState);
+        });
+    }
+
     // ===================== 工具（与源服 OperationAdjudicator 同语义） =====================
 
     /** 状态 id（如 "minecraft:air"/"minecraft:diamond_block"）→ 默认 BlockState；未知 → null。 */
@@ -239,6 +288,44 @@ public final class PlayerOperationHandler implements SlaveControlClient.Operatio
         }
         Block block = BuiltInRegistries.BLOCK.getValue(Identifier.parse(id));
         return block == null ? null : block.defaultBlockState();
+    }
+
+    /**
+     * canonicalState 解析（阶段 9.2 F1）：源服 canonicalState = 执行后 {@code getBlockState()
+     * .toString()}。26.3 格式为 {@code Block{id}[prop=v,...]}（StateHolder.java:42：owner 即
+     * Block.toString()，Block.java:576 {@code Block{<registeredName>}}；与 1.21 的
+     * {@code minecraft:air} 格式不同）——先 {@link #normalizeCanonical} 归一为
+     * {@code id[prop=v,...]}，再经 26.3 {@code BlockStateParser.parseForBlock}
+     * （commands/arguments/blocks/BlockStateParser.java:88，1.21 的 BlockArgumentParser 已改名）
+     * 解析。未知/畸形 → null（调用方 fail closed 等快照纠正）。
+     */
+    public static BlockState parseCanonical(String state) {
+        if (state == null || state.isEmpty()) {
+            return null;
+        }
+        String normalized = normalizeCanonical(state);
+        if (normalized == null) {
+            return null;
+        }
+        try {
+            return net.minecraft.commands.arguments.blocks.BlockStateParser.parseForBlock(
+                    BuiltInRegistries.BLOCK, normalized, false).blockState();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 26.3 BlockState.toString() 归一：{@code Block{id}[prop=v,...]} → {@code id[prop=v,...]}。
+     *  非 {@code Block{...}} 前缀原样返回（兼容纯 id/旧格式）；畸形 → null。 */
+    static String normalizeCanonical(String state) {
+        if (state == null || !state.startsWith("Block{")) {
+            return state;
+        }
+        int close = state.indexOf('}');
+        if (close < 0) {
+            return null;
+        }
+        return state.substring("Block{".length(), close) + state.substring(close + 1);
     }
 
     /** 预条件哈希：sha256hex(BlockState.toString)（与源服 OperationAdjudicator.hash 同算法）。 */

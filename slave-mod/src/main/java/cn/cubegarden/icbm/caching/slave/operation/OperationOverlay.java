@@ -28,6 +28,7 @@ public final class OperationOverlay {
 
     /** 预测状态（待终态）。 */
     public static final class Pending {
+        public final cn.cubegarden.icbm.caching.protocol.DimensionRef dimension;
         public final String playerIdHex;
         public final int posX;
         public final int posY;
@@ -39,8 +40,10 @@ public final class OperationOverlay {
         public final String predictedState; // PLACE 的放置状态 / BREAK 的 "minecraft:air"
         public final long submittedAtMillis;
 
-        Pending(String playerIdHex, int posX, int posY, int posZ, long clientInteractionSequence,
+        Pending(cn.cubegarden.icbm.caching.protocol.DimensionRef dimension, String playerIdHex,
+                int posX, int posY, int posZ, long clientInteractionSequence,
                 Messages.OperationType type, String predictedState, long submittedAtMillis) {
+            this.dimension = dimension;
             this.playerIdHex = playerIdHex;
             this.posX = posX;
             this.posY = posY;
@@ -97,7 +100,7 @@ public final class OperationOverlay {
     public synchronized void submit(String operationIdHex, String playerIdHex,
                                     Messages.SubmitOperation op, String predictedState) {
         long posKey = key(op.posX(), op.posY(), op.posZ());
-        Pending pending = new Pending(playerIdHex, op.posX(), op.posY(), op.posZ(),
+        Pending pending = new Pending(op.dimension(), playerIdHex, op.posX(), op.posY(), op.posZ(),
                 op.clientInteractionSequence(), op.operationType(), predictedState,
                 System.currentTimeMillis());
         this.pendingByOp.put(operationIdHex, pending);
@@ -105,8 +108,10 @@ public final class OperationOverlay {
         this.predicted.put(posKey, predictedState);
     }
 
-    /** COMMITTED：按 operationId 反查 pending → 清除该 pos 预测（真实快照随后覆盖；不保留幽灵状态）。 */
-    public synchronized void onCommitted(byte[] operationId) {
+    /** COMMITTED：按 operationId 反查 pending → 清除该 pos 预测，并返回 pending 供就地应用
+     *  canonicalState（阶段 9.2 F1，草稿 fast-operation-sync §3.1：COMMITTED 到达即应用权威
+     *  状态，不再等 SNAPSHOT 往返）；未知 operationId → null。 */
+    public synchronized Pending onCommitted(byte[] operationId) {
         String id = hex(operationId);
         Pending pending = this.pendingByOp.remove(id);
         if (pending != null) {
@@ -114,6 +119,7 @@ public final class OperationOverlay {
             this.opByPos.remove(posKey);
             this.predicted.remove(posKey);
         }
+        return pending;
     }
 
     /** REJECTED：清除预测并返回完整纠正范围（RESYNC chunk；不做单方块包）。 */

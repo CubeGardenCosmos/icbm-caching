@@ -213,15 +213,23 @@
 - [x] 验证：WorldSimGateTest（GameRules 常量反射自检，防 26.3 常量漂移）+ slave-mod 全测试绿。
       红石不 tick/作物不生长/无生物生成/玩家移动视角正常的真机验证并入 9.5 闭环。
 
-### 9.2 破坏快速同步（master 权威快路径）
+### 9.2 破坏快速同步（master 权威快路径）——已完成
 
-- [ ] 草稿 `draft/fast-operation-sync/`。
-- [ ] F1：OPERATION_COMMITTED 到达 slave 就地应用 canonicalState（Server thread，UPDATE_CLIENTS），
-      视角一致不再等 SNAPSHOT 往返。
-- [ ] F2：源服操作目标 chunk 热驻留（warm ticket 30s + 物化状态机 PUBLISHED_HOLD 阶段）。
-- [ ] F3：NeedsChunk 加载完成回调同 tick 续裁（保留 400 tick 上限 fail closed）。
-- [ ] F4（可选）：pending 操作区块快照优先发布。
-- [ ] 验证：e2e 时延度量（热 ≤200ms / 冷 ≤1s）+ 拒绝路径即时回显回归。
+- [x] 草稿 `draft/fast-operation-sync/` 三步流程（参考仓库无现成参考 → 官方 26.3
+      BlockStateParser/onFullChunkStatusChange/setChunkForced 逐路径核对；canonicalState
+      格式实测为 `Block{id}[props]`（StateHolder.java:42/Block.java:576，与 1.21 不同）；
+      F3 用 ChunkMap.onFullChunkStatusChange 主线程回调（26.3 无 onFullChunkLoad））。
+- [x] F1：slave COMMITTED 就地应用 canonicalState（Server thread，UPDATE_CLIENTS；
+      normalizeCanonical + BlockStateParser 解析；未装载跳过等快照幂等兜底；STATUS_RES
+      同路径）。
+- [x] F2：MaterializeService PUBLISHED_HOLD 阶段 + hold()（30s warm ticket）；OperationQueue
+      终态后委托 hold（不再立即释放）。
+- [x] F3：ChunkMapFullLoadMixin（onFullChunkStatusChange FULL 回调）+ OperationQueue.
+      onChunkFullLoaded 同 tick 续裁（按 chunk 索引；400 tick 上限 fail closed 保留）。
+- [x] F4：pending 操作区块快照优先发布（ChunkSnapshotTicker 排序）。
+- [x] 验证：e2e 时延度量 首次 58ms / warm 复操作 2ms（验收 热≤200ms 达标；冷路径由 9.5
+      真机覆盖——RCON 无头代理无法装载未加载区块）；拒绝路径 bedrock 即时回显回归；
+      全组件测试绿。
 
 ### 9.3 聊天直传 master（CHAT_RELAY + 下行分发）
 

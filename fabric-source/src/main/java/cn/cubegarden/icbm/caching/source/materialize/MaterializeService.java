@@ -45,10 +45,14 @@ public final class MaterializeService {
     static final int GENERATING_TIMEOUT_TICKS = 1200;   // 60s
     /** 发布阶段超时（tick）：快照迟迟未发布（sink 不可用等）→ 释放并记错误。 */
     static final int PUBLISHING_TIMEOUT_TICKS = 600;    // 30s
+    /** 热驻留超时（tick）：操作终态后 warm ticket 保留时长（草稿 fast-operation-sync §3.2）；
+     *  无操作 30s 自动释放，连续破坏/放置不再逐 op 重载。 */
+    static final int PUBLISHED_HOLD_TIMEOUT_TICKS = 600; // 30s
 
     private enum Stage {
         GENERATING,
         PUBLISHING,
+        PUBLISHED_HOLD,
     }
 
     private record Pending(Stage stage, long expectedRevision, int ticks) {
@@ -83,8 +87,7 @@ public final class MaterializeService {
         this.pending.putIfAbsent(key, new Pending(Stage.GENERATING, 0, 0));
     }
 
-    /** 初始区域物化（serverStarted；出生点周边 radius 正方形；主线程）。 */
-    public void materializeInitial(ServerLevel level, BlockPos spawn, int radius) {
+    /** 初始区域物化（serverStarted；出生点周边 radius 正方形；主线程）。 */    public void materializeInitial(ServerLevel level, BlockPos spawn, int radius) {
         int spawnX = spawn.getX() >> 4;
         int spawnZ = spawn.getZ() >> 4;
         int count = 0;
@@ -102,6 +105,23 @@ public final class MaterializeService {
         }
         LOGGER.info("[icbm-source] 初始区域物化: spawn={},{} radius={} 新增 {} 区块（pending={}）",
                 spawnX, spawnZ, radius, count, this.pending.size());
+    }
+
+    /**
+     * 操作终态后热驻留（阶段 9.2 F2，草稿 fast-operation-sync §3.2）：目标 chunk 保留
+     * warm ticket 30s（PUBLISHED_HOLD），连续破坏/放置不再逐 op 重载。区块已装载才登记
+     * （未装载说明操作不可能命中，NeedsChunk 路径已加载）；setChunkForced(true) 幂等，
+     * 与 OperationQueue/物化已有 ticket 共存（超时统一由此释放）。主线程调用。
+     */
+    public void hold(ServerLevel level, int chunkX, int chunkZ) {
+        if (level.getChunkSource().getChunkNow(chunkX, chunkZ) == null) {
+            return; // 未装载：无需驻留（操作命中过说明已装载，此处防御）
+        }
+        ChunkKey key = ChunkKey.of(level.dimension().identifier(), chunkX, chunkZ);
+        if (this.pending.putIfAbsent(key, new Pending(Stage.PUBLISHED_HOLD,
+                this.service.revisionOf(key), 0)) == null) {
+            level.setChunkForced(chunkX, chunkZ, true); // 30s 内不卸载（幂等）
+        }
     }
 
     /** 通道线程入口：从 CHUNK_MATERIALIZE_REQ 解析并切回主线程。 */
@@ -172,6 +192,17 @@ public final class MaterializeService {
                         LOGGER.error("[icbm-source] 物化发布超时（释放 ticket，覆盖缺口 fail closed）: "
                                 + "{} expected={} current={}", key, p.expectedRevision(),
                                 this.service.revisionOf(key));
+                        level.setChunkForced(key.x(), key.z(), false);
+                        it.remove();
+                    } else {
+                        entry.setValue(p);
+                    }
+                }
+                case PUBLISHED_HOLD -> {
+                    if (p.ticks() > PUBLISHED_HOLD_TIMEOUT_TICKS) {
+                        // 热驻留超时（30s 无操作）：释放 warm ticket（区块可正常卸载）
+                        LOGGER.debug("[icbm-source] 操作热驻留到期（释放 warm ticket）: {} ticks={}",
+                                key, p.ticks());
                         level.setChunkForced(key.x(), key.z(), false);
                         it.remove();
                     } else {

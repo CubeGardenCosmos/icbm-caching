@@ -230,6 +230,11 @@ public final class SlaveControlClient implements AutoCloseable {
         return this.requestIds.incrementAndGet();
     }
 
+    /** 服务器引用（阶段 9.2 F1：COMMITTED 就地应用需切 Server thread；由 SlaveMod 装配）。 */
+    public net.minecraft.server.MinecraftServer serverRef() {
+        return this.serverRef;
+    }
+
     /** 等待首轮初始同步（master 连接 + WORLD_EPOCH/首个快照到达）。Server thread 在
      *  装载 spawn 区块前调用：ServeGate 语义要求先同步基线再服务区块（未同步 → 装载
      *  命中空 EMPTY，之后无官方重载 API）。超时返回 false（不阻断启动，区块装载可能
@@ -275,7 +280,7 @@ public final class SlaveControlClient implements AutoCloseable {
         if (result == PutResult.OK) {
             try {
                 this.store.commit(key, snapshot.revision());
-                LOGGER.debug("[icbm-slave] 已装载快照: {} rev={} epoch={}", key, snapshot.revision(), epoch);
+                LOGGER.info("[icbm-slave] 已装载快照: {} rev={} epoch={}", key, snapshot.revision(), epoch);
                 // 快照到达：已装载区块需刷新（乐观操作 COMMITTED 后新状态展示给玩家视角）
                 cn.cubegarden.icbm.caching.slave.world.SnapshotReloader reloader = this.snapshotReloader;
                 if (reloader != null) {
@@ -312,7 +317,7 @@ public final class SlaveControlClient implements AutoCloseable {
         public void onConnected(String serverId) {
             SlaveControlClient.this.loader.setMasterConnected(true);
             SlaveControlClient.this.subscribe();
-            LOGGER.debug("[icbm-slave] master 已连接: {}", serverId);
+            LOGGER.info("[icbm-slave] master 已连接: {}", serverId);
         }
 
         @Override

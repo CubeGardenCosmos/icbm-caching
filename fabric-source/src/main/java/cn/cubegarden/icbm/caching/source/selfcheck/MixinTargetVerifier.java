@@ -21,7 +21,8 @@ public final class MixinTargetVerifier {
     public static boolean verify() {
         return verify(new TargetSet(
                 java.util.Set.of("net.minecraft.world.level.chunk.storage.SerializableChunkData"),
-                java.util.Set.of("net.minecraft.world.level.chunk.ChunkAccess#markUnsaved")));
+                java.util.Set.of("net.minecraft.world.level.chunk.ChunkAccess#markUnsaved",
+                        "net.minecraft.server.level.ChunkMap#onFullChunkStatusChange")));
     }
 
     /** 目标集合（class 全名；method 用 {@code className#methodName}，便于参数化测试）。 */
@@ -47,10 +48,18 @@ public final class MixinTargetVerifier {
     private static boolean checkMethod(String className, String methodName) {
         try {
             Class<?> clazz = Class.forName(className);
-            clazz.getDeclaredMethod(methodName);
-            return true;
+            // 按名字匹配（不限定参数类型——getDeclaredMethod(name) 只匹配无参方法，
+            // 带参数目标（如 ChunkMap.onFullChunkStatusChange）会误报缺失）
+            for (var method : clazz.getDeclaredMethods()) {
+                if (method.getName().equals(methodName)) {
+                    return true;
+                }
+            }
+            LOGGER.error("[icbm-source] Mixin 目标方法缺失: {}.{}（禁用缓存命中，fail closed）",
+                    className, methodName);
+            return false;
         } catch (ReflectiveOperationException | LinkageError e) {
-            LOGGER.error("[icbm-source] Mixin 目标缺失: {}.{}（禁用缓存命中，fail closed）", className, methodName, e);
+            LOGGER.error("[icbm-source] Mixin 目标缺失: {}（禁用缓存命中，fail closed）", className, e);
             return false;
         }
     }
